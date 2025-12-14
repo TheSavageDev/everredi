@@ -6,10 +6,11 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
 # Install dependencies (including dev dependencies for build)
-RUN npm ci
+# Using npm install to regenerate lockfile for Linux platform (Docker build environment)
+RUN npm install
 
 # Copy source files
 COPY . .
@@ -23,10 +24,11 @@ FROM node:24-alpine AS production
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
 # Install only production dependencies
-RUN npm ci --omit=dev && npm cache clean --force
+# Using npm install to regenerate lockfile for Linux platform (Docker build environment)
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist

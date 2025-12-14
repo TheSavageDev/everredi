@@ -1,0 +1,30 @@
+steps:
+  # Install dependencies
+  - name: 'node:24-alpine'
+    entrypoint: 'npm'
+    args: ['ci']
+    dir: 'backend'
+
+  # Run linting
+  - name: 'node:24-alpine'
+    entrypoint: 'npm'
+    args: ['run', 'lint']
+    dir: 'backend'
+
+  # Run tests
+  - name: 'node:24-alpine'
+    entrypoint: 'npm'
+    args: ['test']
+    dir: 'backend'
+
+  # Build application
+  - name: 'node:24-alpine'
+    entrypoint: 'npm'
+    args: ['run', 'build']
+    dir: 'backend'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'

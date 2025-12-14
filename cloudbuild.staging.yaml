@@ -14,12 +14,12 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/everredi-backend-staging:$$VERSION'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/everredi-backend-staging:latest'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:latest'
       - '-f'
-      - 'backend/Dockerfile'
-      - 'backend'
+      - 'Dockerfile'
+      - '.'
     env:
       - 'VERSION=$(cat /workspace/version.txt)'
 
@@ -27,14 +27,14 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/everredi-backend-staging:$$VERSION'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
     env:
       - 'VERSION=$(cat /workspace/version.txt)'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/everredi-backend-staging:latest'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:latest'
 
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -42,9 +42,9 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'everredi-backend-staging'
+      - 'everredi-api-staging'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/everredi-backend-staging:$$VERSION'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
       - '--region'
       - 'us-central1'
       - '--platform'

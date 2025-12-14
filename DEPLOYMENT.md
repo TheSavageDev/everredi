@@ -12,17 +12,17 @@ This document describes how to deploy the Everredi backend to Google Cloud Run u
 ## Environments
 
 1. **Dev/Test** (`main` branch)
-   - Service: `everredi-backend-dev`
+   - Service: `everredi-api-dev`
    - Firestore Database: `(default)` or `dev`
    - Trigger: Push to `main` branch
 
 2. **Staging** (`rc_*` tags)
-   - Service: `everredi-backend-staging`
+   - Service: `everredi-api-staging`
    - Firestore Database: `staging`
    - Trigger: Tag matching `rc_*` (e.g., `rc_1.0.0`)
 
 3. **Production** (`prod_*` tags)
-   - Service: `everredi-backend-prod`
+   - Service: `everredi-api-prod`
    - Firestore Database: `prod`
    - Trigger: Tag matching `prod_*` (e.g., `prod_1.0.0`)
 
@@ -206,7 +206,7 @@ done
    - **Source**: Your repository
    - **Base branch**: `^main$`
    - **Configuration**: Cloud Build configuration file
-   - **Location**: `backend/cloudbuild.pr.yaml`
+   - **Location**: `cloudbuild.pr.yaml`
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**: None needed
 
@@ -220,7 +220,7 @@ done
    - **Source**: Your repository
    - **Branch**: `^main$`
    - **Configuration**: Cloud Build configuration file
-   - **Location**: `backend/cloudbuild.main.yaml`
+   - **Location**: `cloudbuild.main.yaml`
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `dev`
@@ -237,7 +237,7 @@ done
    - **Source**: Your repository
    - **Tag**: `^rc_.*`
    - **Configuration**: Cloud Build configuration file
-   - **Location**: `backend/cloudbuild.staging.yaml`
+   - **Location**: `cloudbuild.staging.yaml`
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `staging`
@@ -254,7 +254,7 @@ done
    - **Source**: Your repository
    - **Tag**: `^prod_.*`
    - **Configuration**: Cloud Build configuration file
-   - **Location**: `backend/cloudbuild.prod.yaml`
+   - **Location**: `cloudbuild.prod.yaml`
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `prod`
@@ -351,19 +351,19 @@ gcloud builds triggers update production-deploy \
 3. Open a Pull Request to `main`
 4. Cloud Build automatically runs validation (lint, test, build)
 5. Merge PR to `main`
-6. Cloud Build automatically deploys to `everredi-backend-dev`
+6. Cloud Build automatically deploys to `everredi-api-dev`
 
 ### Staging
 
 1. Create a release candidate tag: `git tag rc_1.0.0`
 2. Push the tag: `git push origin rc_1.0.0`
-3. Cloud Build automatically deploys to `everredi-backend-staging`
+3. Cloud Build automatically deploys to `everredi-api-staging`
 
 ### Production
 
 1. After testing in staging, create a production tag: `git tag prod_1.0.0`
 2. Push the tag: `git push origin prod_1.0.0`
-3. Cloud Build automatically deploys to `everredi-backend-prod`
+3. Cloud Build automatically deploys to `everredi-api-prod`
 
 ## Manual Deployment
 
@@ -371,13 +371,13 @@ If you need to deploy manually:
 
 ```bash
 # Build and deploy to dev
-gcloud builds submit --config=backend/cloudbuild.main.yaml
+gcloud builds submit --config=cloudbuild.main.yaml
 
 # Build and deploy to staging
-gcloud builds submit --config=backend/cloudbuild.staging.yaml --substitutions=TAG_NAME=rc_1.0.0
+gcloud builds submit --config=cloudbuild.staging.yaml --substitutions=TAG_NAME=rc_1.0.0
 
 # Build and deploy to production
-gcloud builds submit --config=backend/cloudbuild.prod.yaml --substitutions=TAG_NAME=prod_1.0.0
+gcloud builds submit --config=cloudbuild.prod.yaml --substitutions=TAG_NAME=prod_1.0.0
 ```
 
 ## Environment Variables Reference
@@ -411,7 +411,7 @@ Example: `firebase-private-key-dev`, `firebase-private-key-staging`, `firebase-p
 The service exposes a health check endpoint at `/api/health`:
 
 ```bash
-curl https://everredi-backend-dev-xxxxx.run.app/api/health
+curl https://everredi-api-dev-xxxxx.run.app/api/health
 ```
 
 Response:
@@ -420,7 +420,7 @@ Response:
 {
   "status": "ok",
   "timestamp": "2025-12-12T12:00:00.000Z",
-  "service": "everredi-backend-api",
+  "service": "everredi-api",
   "environment": "production"
 }
 ```
@@ -442,7 +442,7 @@ Response:
 
 ### Runtime Errors
 
-- Check Cloud Run logs: `gcloud run services logs read everredi-backend-dev --region=us-central1`
+- Check Cloud Run logs: `gcloud run services logs read everredi-api-dev --region=us-central1`
 - Verify Firebase initialization in logs
 - Check that Firestore database ID matches environment
 

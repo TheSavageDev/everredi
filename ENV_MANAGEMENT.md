@@ -31,7 +31,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'everredi-backend-${_ENVIRONMENT}'
+      - 'everredi-api-${_ENVIRONMENT}'
       - '--set-env-vars'
       - 'NODE_ENV=production,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_ID=${_FIREBASE_DATABASE_ID},CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
 ```
@@ -87,8 +87,8 @@ steps:
       - '-c'
       - |
         # Parse YAML and set env vars (requires yq or similar)
-        CORS_ORIGIN=$(yq eval '.cors.origin' backend/config/env.dev.yaml)
-        DB_ID=$(yq eval '.firebase.databaseId' backend/config/env.dev.yaml)
+        CORS_ORIGIN=$(yq eval '.cors.origin' config/env.dev.yaml)
+        DB_ID=$(yq eval '.firebase.databaseId' config/env.dev.yaml)
         # Export for next steps
         echo "CORS_ORIGIN=${CORS_ORIGIN}" >> /workspace/env_vars.txt
         echo "DB_ID=${DB_ID}" >> /workspace/env_vars.txt
@@ -100,7 +100,7 @@ steps:
       - '-c'
       - |
         source /workspace/env_vars.txt
-        gcloud run deploy everredi-backend-dev \
+        gcloud run deploy everredi-api-dev \
           --set-env-vars "CORS_ORIGIN=${CORS_ORIGIN},FIREBASE_DATABASE_ID=${DB_ID}"
 ```
 
@@ -146,7 +146,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'everredi-backend-${_ENV}'
+      - 'everredi-api-${_ENV}'
       - '--set-secrets'
       - 'FIREBASE_PRIVATE_KEY=firebase-private-key-${_ENV}:latest,FIREBASE_CLIENT_EMAIL=firebase-client-email-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest'
 ```
@@ -175,7 +175,7 @@ Combine multiple approaches:
 #### 1. Create config template in repo:
 
 ```yaml
-# backend/config/env.template.yaml
+# config/env.template.yaml
 environment: ${ENV}
 firebase:
   projectId: ${PROJECT_ID}
@@ -205,7 +205,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'everredi-backend-${_ENV}'
+      - 'everredi-api-${_ENV}'
       - '--set-env-vars'
       - 'NODE_ENV=production,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_ID=${_DATABASE_ID},CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
       - '--set-secrets'
@@ -239,11 +239,11 @@ Create service configuration files and apply them during deployment.
 ### Create service config files:
 
 ```yaml
-# backend/config/service.dev.yaml
+# config/service.dev.yaml
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: everredi-backend-dev
+  name: everredi-api-dev
 spec:
   template:
     metadata:
@@ -253,7 +253,7 @@ spec:
       containerConcurrency: 80
       timeoutSeconds: 300
       containers:
-        - image: gcr.io/PROJECT_ID/everredi-backend-dev:latest
+        - image: gcr.io/PROJECT_ID/everredi-api-dev:latest
           ports:
             - name: http1
               containerPort: 8080
@@ -283,7 +283,7 @@ steps:
     args:
       - '-c'
       - |
-        sed "s/PROJECT_ID/$PROJECT_ID/g" backend/config/service.dev.yaml > /workspace/service.yaml
+        sed "s/PROJECT_ID/$PROJECT_ID/g" config/service.dev.yaml > /workspace/service.yaml
 
   # Deploy using config file
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -309,7 +309,7 @@ steps:
 
 ## Recommended Setup for This Project
 
-For the Everredi backend, I recommend **Approach 4 (Hybrid)**:
+For the Everredi api, I recommend **Approach 4 (Hybrid)**:
 
 1. **Update cloudbuild files** to use substitution variables for non-sensitive config
 2. **Use Secret Manager** with environment prefixes for secrets

@@ -3,25 +3,25 @@ steps:
   - name: 'node:24-alpine'
     entrypoint: 'npm'
     args: ['ci']
-    dir: 'backend'
+    dir: '.'
 
   # Run linting
   - name: 'node:24-alpine'
     entrypoint: 'npm'
     args: ['run', 'lint']
-    dir: 'backend'
+    dir: '.'
 
   # Run tests
   - name: 'node:24-alpine'
     entrypoint: 'npm'
     args: ['test']
-    dir: 'backend'
+    dir: '.'
 
   # Build application
   - name: 'node:24-alpine'
     entrypoint: 'npm'
     args: ['run', 'build']
-    dir: 'backend'
+    dir: '.'
 
 options:
   machineType: 'E2_HIGHCPU_8'

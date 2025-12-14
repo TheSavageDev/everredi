@@ -1,98 +1,275 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Everredi API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API for the Everredi emergency preparedness application, built with NestJS, Firebase, and Google Cloud Platform.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Overview
 
-## Description
+The EverRedi api provides RESTful APIs for managing emergency preparedness kits, inventory items, locations, supplies, and user subscriptions. It integrates with Firebase Authentication, Firestore, Stripe, and Google Cloud services.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Prerequisites
 
-## Project setup
+- **Node.js**: >= 24.0.0 (LTS)
+- **npm**: >= 11.0.0
+- **Google Cloud Project**: With billing enabled
+- **Firebase Project**: Configured with Firestore
+- **Service Account**: Firebase Admin SDK credentials (JSON key file)
+
+## Installation
 
 ```bash
-$ npm install
+# Install dependencies
+npm install
 ```
 
-## Compile and run the project
+## Environment Configuration
+
+Copy the example environment file and configure it:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cp env.example .env
 ```
 
-## Run tests
+Update `.env` with your configuration:
+
+```env
+# Firebase Configuration
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_PRIVATE_KEY=your-private-key
+FIREBASE_CLIENT_EMAIL=your-client-email
+FIREBASE_DATABASE_ID=(default)
+
+# Server Configuration
+PORT=5051
+CORS_ORIGIN=http://localhost:3000
+
+# Stripe Configuration
+STRIPE_SECRET_KEY=your-stripe-secret-key
+STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret
+
+# Frontend URL
+FRONTEND_URL=http://localhost:3000
+
+# Gemini AI Configuration
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-1.0-pro
+```
+
+### Firebase Service Account
+
+Place your Firebase service account JSON key file in the project root (e.g., `everredi-dev.json`). The file will be automatically loaded by the Firebase configuration module.
+
+**Note**: Service account JSON files are excluded from git via `.gitignore` for security.
+
+## Development
 
 ```bash
-# unit tests
-$ npm run test
+# Start in development mode (with hot reload)
+npm run start:dev
 
-# e2e tests
-$ npm run test:e2e
+# Start in debug mode
+npm run start:debug
 
-# test coverage
-$ npm run test:cov
+# Build the project
+npm run build
+
+# Start production build locally
+npm run start:prod
 ```
+
+The API will be available at `http://localhost:5051` (or the port specified in your `.env`).
+
+### Health Check
+
+```bash
+curl http://localhost:5051/health
+```
+
+## Testing
+
+```bash
+# Run unit tests
+npm run test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run e2e tests
+npm run test:e2e
+
+# Generate test coverage
+npm run test:cov
+```
+
+## Code Quality
+
+```bash
+# Lint code
+npm run lint
+
+# Format code
+npm run format
+```
+
+## Project Structure
+
+```
+src/
+├── ai/                    # AI/Gemini integration
+├── auth/                  # Authentication endpoints
+├── common/                # Shared decorators and guards
+│   ├── decorators/        # Custom decorators (e.g., @CurrentUser)
+│   └── guards/            # Auth guards (Firebase)
+├── config/                # Configuration modules
+│   ├── firebase.config.ts # Firebase Admin SDK setup
+│   └── ...
+├── inventory/             # Inventory item management
+├── kits/                  # Emergency kit templates and user kits
+├── locations/             # Location management
+├── notifications/         # Push notifications and expiration alerts
+├── subscriptions/         # Stripe subscription management
+├── supplies/              # Supply item management
+├── supply-categories/    # Supply category management
+└── users/                 # User profile management
+```
+
+## Key Features
+
+### Authentication
+
+- Firebase Authentication integration
+- Protected routes with `@UseGuards(FirebaseAuthGuard)`
+- Current user decorator `@CurrentUser()`
+
+### Inventory Management
+
+- CRUD operations for inventory items
+- Expiration date tracking
+- Automatic expiration notifications (60, 30, 10, 1 days before expiration)
+- Purchase date tracking
+
+### Emergency Kits
+
+- Pre-built kit templates
+- User-created custom kits
+- Kit item management
+- Public template sharing
+
+### Notifications
+
+- Push notification support
+- Expiration alerts via cron jobs
+- Device token management
+- In-app notification tracking
+
+### Subscriptions
+
+- Stripe integration
+- Subscription management
+- Webhook handling
+
+### AI Integration
+
+- Google Gemini AI for intelligent features
+- Configurable model selection
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+The api is deployed to Google Cloud Run with automated CI/CD via Cloud Build.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Environments
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+- **Dev/Test**: Deployed from `main` branch → `everredi-api-dev`
+- **Staging**: Deployed from `rc_*` tags → `everredi-api-staging`
+- **Production**: Deployed from `prod_*` tags → `everredi-api-prod`
+
+### Deployment Documentation
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions, including:
+
+- Cloud Build setup
+- Service account configuration
+- Environment variable management
+- Firestore database configuration
+
+### Environment Management
+
+See [ENV_MANAGEMENT.md](./ENV_MANAGEMENT.md) for detailed information on managing environment-specific configurations.
+
+## Database
+
+The api uses Firestore (Firebase) for data storage. Each environment uses a separate Firestore database:
+
+- **Dev**: `(default)` database
+- **Staging**: `staging` database
+- **Production**: `prod` database
+
+## Scheduled Jobs
+
+The application uses NestJS Schedule for cron-based jobs:
+
+- **Expiration Notifications**: Runs daily at 9 AM to check for expiring inventory items and send notifications
+
+## API Documentation
+
+### Health Check
+
+```
+GET /health
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Returns service status and environment information.
 
-## Resources
+### Authentication
 
-Check out a few resources that may come in handy when working with NestJS:
+All protected endpoints require a valid Firebase ID token in the `Authorization` header:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```
+Authorization: Bearer <firebase-id-token>
+```
 
-## Support
+## Scripts
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+### Template Management
 
-## Stay in touch
+```bash
+# Seed kit templates
+npm run seed:templates
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Verify template items
+npm run verify:templates
+
+# Verify public templates
+npm run verify:public
+```
+
+## Docker
+
+The project includes a Dockerfile for containerization:
+
+```bash
+# Build Docker image
+docker build -t everredi-api .
+
+# Run container
+docker run -p 8080:8080 --env-file .env everredi-api
+```
+
+## Troubleshooting
+
+### Firebase Connection Issues
+
+- Verify your service account JSON file is in the project root
+- Check that `FIREBASE_PROJECT_ID` matches your Firebase project
+- Ensure Firestore is enabled in your Firebase project
+
+### Port Already in Use
+
+Change the `PORT` in your `.env` file or stop the process using the port.
+
+### Permission Errors
+
+For Cloud Build and deployment issues, see [DEPLOYMENT.md](./DEPLOYMENT.md) troubleshooting section.
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Private - UNLICENSED

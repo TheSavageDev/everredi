@@ -10,7 +10,7 @@ export class AppController {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      service: 'everredi-backend-api',
+      service: 'everredi-api',
       environment: process.env.NODE_ENV || 'development',
     };
   }

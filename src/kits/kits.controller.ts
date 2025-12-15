@@ -285,6 +285,27 @@ export class UserKitsController {
     };
   }
 
+  @Post(':id/items/:itemId/move')
+  async moveKitItemInstance(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() body: { targetKitId: string },
+  ) {
+    const item = await this.userKitsService.moveKitItemInstance(
+      user.uid,
+      id,
+      itemId,
+      body.targetKitId,
+    );
+    return {
+      success: true,
+      data: item,
+      message: 'Kit item moved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Delete(':id/items/:itemId')
   async deleteKitItemInstance(
     @CurrentUser() user: any,

@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { InventoryService } from '../inventory/inventory.service';
 
 export interface UserKit {
   id: string;
@@ -35,6 +41,8 @@ export interface KitItemInstance {
 export class UserKitsService {
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(forwardRef(() => InventoryService))
+    private readonly inventoryService: InventoryService,
   ) {}
 
   async getUserKits(userId: string): Promise<UserKit[]> {
@@ -162,6 +170,41 @@ export class UserKitsService {
         }
 
         batch.set(itemInstanceRef, itemInstanceData);
+
+        // If fully loaded, also create inventory items
+        if (includeItems && actualQuantity > 0) {
+          try {
+            const inventoryItemData: any = {
+              supplyId: item.supplyId,
+              supplyName: item.supplyName || 'Unknown item',
+              locationId,
+              locationName,
+              kitId: kit.id, // Link inventory item to the kit
+              kitName: kit.name, // Include kit name for easy reference
+              quantity: actualQuantity,
+              status: 'active',
+            };
+
+            // Only include notes if it's defined and not empty
+            if (item.notes) {
+              inventoryItemData.notes = item.notes;
+            }
+
+            await this.inventoryService.createInventoryItem(
+              userId,
+              inventoryItemData,
+            );
+            console.log(
+              `Created inventory item for ${item.supplyName} (quantity: ${actualQuantity}, kit: ${kit.name})`,
+            );
+          } catch (error) {
+            console.error(
+              `Failed to create inventory item for ${item.supplyName}:`,
+              error,
+            );
+            // Don't fail the entire operation if inventory creation fails
+          }
+        }
       }
 
       await batch.commit();
@@ -381,6 +424,76 @@ export class UserKitsService {
 
     const updatedDoc = await itemRef.get();
     return { id: updatedDoc.id, ...updatedDoc.data() } as KitItemInstance;
+  }
+
+  async moveKitItemInstance(
+    userId: string,
+    sourceKitId: string,
+    itemId: string,
+    targetKitId: string,
+  ): Promise<KitItemInstance> {
+    // Verify both kits exist
+    const sourceKitRef = this.firestore
+      .collection('users')
+      .doc(userId)
+      .collection('userKits')
+      .doc(sourceKitId);
+    const sourceKitDoc = await sourceKitRef.get();
+    if (!sourceKitDoc.exists) {
+      throw new NotFoundException('Source kit not found');
+    }
+
+    const targetKitRef = this.firestore
+      .collection('users')
+      .doc(userId)
+      .collection('userKits')
+      .doc(targetKitId);
+    const targetKitDoc = await targetKitRef.get();
+    if (!targetKitDoc.exists) {
+      throw new NotFoundException('Target kit not found');
+    }
+
+    if (sourceKitId === targetKitId) {
+      throw new Error('Cannot move item to the same kit');
+    }
+
+    // Get the item from source kit
+    const sourceItemRef = sourceKitRef.collection('kitItems').doc(itemId);
+    const sourceItemDoc = await sourceItemRef.get();
+    if (!sourceItemDoc.exists) {
+      throw new NotFoundException('Kit item instance not found');
+    }
+
+    const itemData = sourceItemDoc.data() as KitItemInstance;
+
+    // Create item in target kit
+    const targetItemRef = targetKitRef.collection('kitItems').doc();
+    const now = Timestamp.now();
+
+    const newItemData: any = {
+      userKitId: targetKitId,
+      supplyId: itemData.supplyId,
+      supplyName: itemData.supplyName,
+      requiredQuantity: itemData.requiredQuantity,
+      actualQuantity: itemData.actualQuantity,
+      status: itemData.status,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (itemData.notes) {
+      newItemData.notes = itemData.notes;
+    }
+
+    // Use batch to ensure atomicity
+    const batch = this.firestore.batch();
+    batch.set(targetItemRef, newItemData);
+    batch.delete(sourceItemRef);
+
+    await batch.commit();
+
+    const newItemDoc = await targetItemRef.get();
+    return { id: newItemDoc.id, ...newItemDoc.data() } as KitItemInstance;
   }
 
   async deleteKitItemInstance(

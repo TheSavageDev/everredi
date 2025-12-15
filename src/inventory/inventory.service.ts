@@ -13,6 +13,8 @@ export interface InventoryItem {
   supplyCategoryId?: string;
   locationId: string;
   locationName?: string;
+  kitId?: string; // Optional: if this item belongs to a specific kit
+  kitName?: string; // Optional: name of the kit this item belongs to
   quantity: number;
   expirationDate?: Timestamp;
   purchaseDate?: Timestamp;
@@ -112,11 +114,18 @@ export class InventoryService {
 
     // Build document data, omitting undefined values
     const documentData: Record<string, unknown> = {
-      ...itemData,
       userId,
       createdAt: now,
       updatedAt: now,
     };
+
+    // Only include fields that are not undefined
+    Object.keys(itemData).forEach((key) => {
+      const value = itemData[key as keyof typeof itemData];
+      if (value !== undefined) {
+        documentData[key] = value;
+      }
+    });
 
     // Set converted timestamps
     if (expirationTimestamp) {

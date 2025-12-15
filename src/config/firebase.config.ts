@@ -17,27 +17,48 @@ export function initializeFirebase(configService: ConfigService): void {
     ?.replace(/\\n/g, '\n');
   const clientEmail = configService.get<string>('FIREBASE_CLIENT_EMAIL');
 
-  if (!projectId || !privateKey || !clientEmail) {
-    console.warn(
-      '⚠️  Firebase Admin SDK not initialized: Missing environment variables.\n' +
-        '   Please set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in your .env file.\n' +
-        '   The app will start but Firebase features will not work until configured.',
-    );
-    return;
-  }
+  // Check if running on GCP (Cloud Run, GCE, etc.) - use Application Default Credentials
+  const isGCP = !!(
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCLOUD_PROJECT ||
+    process.env.K_SERVICE || // Cloud Run sets this
+    process.env.K_REVISION // Cloud Run sets this
+  );
 
   try {
-    const serviceAccount = {
-      projectId,
-      privateKey,
-      clientEmail,
-    };
+    let credential: admin.credential.Credential;
+
+    if (isGCP && projectId) {
+      // On GCP, use Application Default Credentials (ADC)
+      // The service account attached to Cloud Run will be used automatically
+      console.log(
+        '🔐 Using Application Default Credentials (GCP environment detected)',
+      );
+      credential = admin.credential.applicationDefault();
+    } else if (projectId && privateKey && clientEmail) {
+      // Local development or explicit credentials provided
+      const serviceAccount = {
+        projectId,
+        privateKey,
+        clientEmail,
+      };
+      credential = admin.credential.cert(
+        serviceAccount as admin.ServiceAccount,
+      );
+    } else {
+      console.warn(
+        '⚠️  Firebase Admin SDK not initialized: Missing environment variables.\n' +
+          '   Please set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in your .env file.\n' +
+          '   The app will start but Firebase features will not work until configured.',
+      );
+      return;
+    }
 
     const databaseId =
       configService.get<string>('FIREBASE_DATABASE_ID') || '(default)';
 
     firebaseAdminInstance = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
+      credential,
       databaseURL: `https://${projectId}.firebaseio.com`,
     });
     isInitialized = true;

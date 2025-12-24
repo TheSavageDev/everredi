@@ -40,4 +40,4 @@ EXPOSE 8080
 ENV NODE_ENV=production
 
 # Run the application
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]

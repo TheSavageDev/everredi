@@ -1,35 +1,21 @@
 steps:
-  # Extract version from tag (rc_1.0.0 -> 1.0.0)
-  - name: 'bash'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        VERSION=$${TAG_NAME#rc_}
-        echo "$$VERSION" > /workspace/version.txt
-        echo "Building version: $$VERSION"
-
   # Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$SHORT_SHA'
       - '-t'
       - 'gcr.io/$PROJECT_ID/everredi-api-staging:latest'
       - '-f'
       - 'Dockerfile'
       - '.'
-    env:
-      - 'VERSION=$(cat /workspace/version.txt)'
 
   # Push to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
-    env:
-      - 'VERSION=$(cat /workspace/version.txt)'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$SHORT_SHA'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
@@ -44,7 +30,7 @@ steps:
       - 'deploy'
       - 'everredi-api-staging'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$$VERSION'
+      - 'gcr.io/$PROJECT_ID/everredi-api-staging:$SHORT_SHA'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -64,15 +50,12 @@ steps:
       - '10'
       - '--timeout'
       - '300'
-    env:
-      - 'VERSION=$(cat /workspace/version.txt)'
 
 options:
   machineType: 'E2_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
 
 substitutions:
-  VERSION: ''
   _ENV: 'staging'
   _DATABASE_ID: 'staging'
   _CORS_ORIGIN: 'https://staging.everredi.com'

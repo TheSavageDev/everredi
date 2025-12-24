@@ -1,12 +1,14 @@
 import {
+  ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
-  Inject,
   forwardRef,
 } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { UsersService } from '../users/users.service';
 import { InventoryService } from '../inventory/inventory.service';
 
 export interface UserKit {
@@ -43,6 +45,7 @@ export class UserKitsService {
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     @Inject(forwardRef(() => InventoryService))
     private readonly inventoryService: InventoryService,
+    private readonly usersService: UsersService,
   ) {}
 
   async getUserKits(userId: string): Promise<UserKit[]> {
@@ -77,6 +80,27 @@ export class UserKitsService {
     userId: string,
     kitData: Omit<UserKit, 'id' | 'userId' | 'createdAt' | 'updatedAt'>,
   ): Promise<UserKit> {
+    const isPremium = await this.usersService.isPremiumUser(userId);
+    if (!isPremium) {
+      const snapshot = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('userKits')
+        .where('status', 'in', ['active', 'incomplete'])
+        .get();
+
+      const activeCount = snapshot.size;
+      const maxFreeKits = 5;
+
+      if (activeCount >= maxFreeKits) {
+        throw new ForbiddenException({
+          code: 'KIT_LIMIT_REACHED',
+          message:
+            'You have reached the free limit of 5 kits. Upgrade to premium for unlimited kits.',
+        });
+      }
+    }
+
     const now = Timestamp.now();
     const docRef = await this.firestore
       .collection('users')

@@ -24,12 +24,24 @@ export class SubscriptionsService {
     }
 
     // Get or create Stripe customer
-    const customerId = user.firebaseUid; // TODO: Store Stripe customer ID in user document
+    let customerId = user.stripeCustomerId;
+
+    if (!customerId) {
+      const customer = await this.stripeService.createCustomer(
+        user.email,
+        userId,
+      );
+      customerId = customer.id;
+      await this.usersService.updateUser(userId, {
+        stripeCustomerId: customerId,
+      });
+    }
 
     const session = await this.stripeService.createCheckoutSession(
       customerId,
       priceId,
       mode,
+      userId,
     );
 
     return {
@@ -44,8 +56,10 @@ export class SubscriptionsService {
       throw new Error('User not found');
     }
 
-    // TODO: Get Stripe customer ID from user document
-    const customerId = user.firebaseUid;
+    const customerId = user.stripeCustomerId;
+    if (!customerId) {
+      throw new Error('Stripe customer not found for user');
+    }
 
     const session =
       await this.stripeService.createCustomerPortalSession(customerId);
@@ -85,7 +99,7 @@ export class SubscriptionsService {
     if (!userId) return;
 
     await this.updateUserSubscription(userId, {
-      subscriptionTier: 'premium',
+      subscriptionTier: subscription.status === 'active' ? 'premium' : 'free',
       subscriptionStatus:
         subscription.status === 'active' ? 'active' : 'cancelled',
       subscriptionExpiresAt: Timestamp.fromDate(

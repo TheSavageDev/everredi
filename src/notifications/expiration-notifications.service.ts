@@ -1,10 +1,11 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
 import { PushNotificationService } from './push-notification.service';
 import { NotificationsService } from './notifications.service';
+import { UsersService } from '../users/users.service';
 
 const logger = new Logger('ExpirationNotificationsService');
 
@@ -25,6 +26,7 @@ export class ExpirationNotificationsService {
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     private readonly pushNotificationService: PushNotificationService,
     private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
@@ -44,6 +46,9 @@ export class ExpirationNotificationsService {
 
       for (const userDoc of allUsersSnapshot.docs) {
         const userId = userDoc.id;
+
+        const isPremium = await this.usersService.isPremiumUser(userId);
+
         const itemsSnapshot = await this.firestore
           .collection('users')
           .doc(userId)
@@ -56,6 +61,10 @@ export class ExpirationNotificationsService {
           id: doc.id,
           ...doc.data(),
         })) as InventoryItem[];
+
+        // For free users, only allow up to N active expiration notifications
+        const maxFreeReminders = 10;
+        let remindersCreatedForUser = 0;
 
         for (const item of items) {
           if (!item.expirationDate) continue;
@@ -79,6 +88,9 @@ export class ExpirationNotificationsService {
               daysUntilExpiration > nextSmallerAlert &&
               !this.hasNotificationBeenSent(item, alertDays)
             ) {
+              if (!isPremium && remindersCreatedForUser >= maxFreeReminders) {
+                continue;
+              }
               try {
                 await this.sendExpirationNotification(
                   item,
@@ -87,6 +99,7 @@ export class ExpirationNotificationsService {
                 );
                 await this.markNotificationAsSent(item.id, userId, alertDays);
                 totalNotificationsSent++;
+                remindersCreatedForUser++;
                 logger.log(
                   `Sent ${alertDays}-day expiration notification for item ${item.id} (${item.supplyName})`,
                 );

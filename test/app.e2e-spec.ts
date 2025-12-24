@@ -1,25 +1,29 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
+import request from 'supertest';
+import type { TestAppContext } from './utils/create-testing-app';
+import { createTestingApp } from './utils/create-testing-app';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let context: TestAppContext;
+  let server: unknown;
 
   beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    context = await createTestingApp();
+    server = context.app.getHttpServer();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
+  afterEach(async () => {
+    await context.close();
+  });
+
+  it('/api/health (GET)', () => {
+    return request(server)
+      .get('/api/health')
       .expect(200)
-      .expect('Hello World!');
+      .expect((res) => {
+        expect(res.body).toMatchObject({
+          status: 'ok',
+          service: 'everredi-api',
+        });
+      });
   });
 });

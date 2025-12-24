@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   Headers,
   Req,
@@ -8,16 +9,19 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
+import { SkipThrottle } from '@nestjs/throttler';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SubscriptionsService } from './subscriptions.service';
 import { StripeService } from './stripe.service';
+import { RevenueCatService } from './revenuecat.service';
 
 @Controller('subscriptions')
 export class SubscriptionsController {
   constructor(
     private readonly subscriptionsService: SubscriptionsService,
     private readonly stripeService: StripeService,
+    private readonly revenueCatService: RevenueCatService,
   ) {}
 
   @Post('create-checkout')
@@ -54,6 +58,7 @@ export class SubscriptionsController {
   }
 
   @Post('webhook')
+  @SkipThrottle()
   async handleWebhook(
     @Req() req: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string,
@@ -68,6 +73,70 @@ export class SubscriptionsController {
     } catch (error) {
       console.error('Webhook error:', error);
       return { received: false, error: error.message };
+    }
+  }
+
+  @Get('revenuecat/info')
+  @UseGuards(FirebaseAuthGuard)
+  async getRevenueCatInfo(@CurrentUser() user: any): Promise<{
+    success: boolean;
+    data?: any;
+    error?: { message: string };
+    message?: string;
+    timestamp: string;
+  }> {
+    try {
+      const customerInfo = await this.revenueCatService.getCustomerInfo(
+        user.uid,
+      );
+      return {
+        success: true,
+        data: customerInfo,
+        message: 'Customer info retrieved successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: {
+          message: error.message || 'Failed to retrieve customer info',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  @Post('revenuecat/cancel')
+  @UseGuards(FirebaseAuthGuard)
+  async cancelRevenueCatSubscription(
+    @CurrentUser() user: any,
+    @Body() body: { productId: string },
+  ): Promise<{
+    success: boolean;
+    data?: any;
+    error?: { message: string };
+    message?: string;
+    timestamp: string;
+  }> {
+    try {
+      const result = await this.revenueCatService.cancelSubscription(
+        user.uid,
+        body.productId,
+      );
+      return {
+        success: true,
+        data: result,
+        message: 'Subscription cancelled successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: {
+          message: error.message || 'Failed to cancel subscription',
+        },
+        timestamp: new Date().toISOString(),
+      };
     }
   }
 }

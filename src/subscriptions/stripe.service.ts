@@ -12,9 +12,10 @@ export class StripeService {
   }
 
   async createCheckoutSession(
-    customerId: string,
+    customerId: string | undefined,
     priceId: string,
     mode: 'subscription' | 'payment' = 'subscription',
+    userId?: string,
   ): Promise<Stripe.Checkout.Session> {
     return this.stripe.checkout.sessions.create({
       customer: customerId,
@@ -27,6 +28,25 @@ export class StripeService {
       ],
       success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
+      metadata: userId ? { userId } : undefined,
+      subscription_data:
+        mode === 'subscription' && userId
+          ? {
+              metadata: { userId },
+            }
+          : undefined,
+    });
+  }
+
+  async createCustomer(
+    email: string,
+    userId: string,
+  ): Promise<Stripe.Customer> {
+    return this.stripe.customers.create({
+      email,
+      metadata: {
+        userId,
+      },
     });
   }
 

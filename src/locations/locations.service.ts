@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { UsersService } from '../users/users.service';
 
 export interface Location {
   id: string;
@@ -23,6 +29,7 @@ export interface Location {
 export class LocationsService {
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly usersService: UsersService,
   ) {}
 
   async getLocations(userId: string): Promise<Location[]> {
@@ -57,6 +64,26 @@ export class LocationsService {
     userId: string,
     locationData: Omit<Location, 'id' | 'userId' | 'createdAt' | 'updatedAt'>,
   ): Promise<Location> {
+    const isPremium = await this.usersService.isPremiumUser(userId);
+    if (!isPremium) {
+      const snapshot = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('locations')
+        .get();
+
+      const count = snapshot.size;
+      const maxFreeLocations = 2;
+
+      if (count >= maxFreeLocations) {
+        throw new ForbiddenException({
+          code: 'LOCATION_LIMIT_REACHED',
+          message:
+            'You have reached the free limit of 2 locations. Upgrade to premium for unlimited locations.',
+        });
+      }
+    }
+
     const now = Timestamp.now();
     const docRef = await this.firestore
       .collection('users')

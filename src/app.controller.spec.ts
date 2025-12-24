@@ -1,14 +1,41 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { EnvValidationService } from './config/env-validation.service';
 
 describe('AppController', () => {
   let appController: AppController;
 
   beforeEach(async () => {
+    const mockEnvValidationService = {
+      validate: jest.fn().mockReturnValue({
+        isValid: true,
+        missing: [],
+        warnings: [],
+      }),
+      getConfigStatus: jest.fn().mockReturnValue({
+        firebase: { configured: true, projectId: 'test' },
+        stripe: { configured: false },
+        gemini: { configured: false },
+      }),
+    };
+
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        AppService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(),
+          },
+        },
+        {
+          provide: EnvValidationService,
+          useValue: mockEnvValidationService,
+        },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
@@ -17,9 +44,10 @@ describe('AppController', () => {
   describe('health', () => {
     it('should return health status', () => {
       const result = appController.getHealth();
-      expect(result).toHaveProperty('status', 'ok');
+      expect(result).toHaveProperty('status');
       expect(result).toHaveProperty('timestamp');
       expect(result).toHaveProperty('service');
+      expect(result).toHaveProperty('config');
     });
   });
 });

@@ -20,7 +20,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed:templates": "ts-node -r tsconfig-paths/register src/kits/seed-templates.ts",
     "verify:templates": "ts-node -r tsconfig-paths/register src/kits/verify-template-items.ts",
-    "verify:public": "ts-node -r tsconfig-paths/register src/kits/verify-public-template-items.ts"
+    "verify:public": "ts-node -r tsconfig-paths/register src/kits/verify-public-template-items.ts",
+    "set-admin": "ts-node -r tsconfig-paths/register scripts/set-admin-user.ts",
+    "test:system": "ts-node -r tsconfig-paths/register scripts/test-system.ts",
+    "test:system:debug": "DEBUG=true ts-node -r tsconfig-paths/register scripts/test-system.ts",
+    "get-token": "ts-node -r tsconfig-paths/register scripts/get-token.ts"
   },
   "dependencies": {
     "@google-cloud/tasks": "^5.5.2",
@@ -30,8 +34,10 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^6.1.0",
+    "@nestjs/throttler": "^6.5.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "date-fns": "^4.1.0",
     "firebase-admin": "^13.6.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
@@ -65,22 +71,5 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
   }
 }

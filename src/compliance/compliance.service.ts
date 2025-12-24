@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { UsersService } from '../users/users.service';
 
 export interface OshaComplianceRule {
   id: string;
@@ -49,6 +55,7 @@ export interface ComplianceCheck {
 export class ComplianceService {
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly usersService: UsersService,
   ) {}
 
   async checkCompliance(
@@ -57,6 +64,30 @@ export class ComplianceService {
     oshaRuleId?: string,
     industry?: string,
   ): Promise<ComplianceCheck> {
+    const isPremium = await this.usersService.isPremiumUser(userId);
+
+    if (!isPremium) {
+      // Count existing compliance checks for this kit
+      const checksSnapshot = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('userKits')
+        .doc(userKitId)
+        .collection('complianceChecks')
+        .get();
+
+      const existingChecks = checksSnapshot.size;
+      const maxFreeChecksPerKit = 1;
+
+      if (existingChecks >= maxFreeChecksPerKit) {
+        throw new ForbiddenException({
+          code: 'COMPLIANCE_LIMIT_REACHED',
+          message:
+            'You have used your free OSHA compliance check for this kit. Upgrade to premium for unlimited compliance checks.',
+        });
+      }
+    }
+
     // Get kit items
     const kitItemsSnapshot = await this.firestore
       .collection('users')

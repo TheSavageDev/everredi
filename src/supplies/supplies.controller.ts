@@ -1,5 +1,14 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+} from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { SuppliesService } from './supplies.service';
 
 @Controller('supplies')
@@ -56,6 +65,27 @@ export class SuppliesController {
       success: true,
       data: supply,
       message: 'Supply retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Patch(':id')
+  @UseGuards(FirebaseAuthGuard, AdminGuard)
+  async updateSupply(
+    @Param('id') id: string,
+    @Body()
+    body: Partial<{
+      isSponsored: boolean;
+      sponsoredBy: string;
+      sponsoredUntil: string;
+      sponsoredPriority: number;
+    }>,
+  ) {
+    const supply = await this.suppliesService.updateSupply(id, body);
+    return {
+      success: true,
+      data: supply,
+      message: 'Supply updated successfully',
       timestamp: new Date().toISOString(),
     };
   }

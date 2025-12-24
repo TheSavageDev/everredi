@@ -1,4 +1,4 @@
-import { Controller, Get, Put, UseGuards, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, UseGuards, Body } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
@@ -37,6 +37,33 @@ export class UsersController {
       success: true,
       data: status,
       message: 'Subscription status retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post('me/referral/apply')
+  async applyReferralCode(
+    @CurrentUser() user: any,
+    @Body() body: { referralCode: string },
+  ) {
+    const result = await this.usersService.applyReferralCode(
+      user.uid,
+      body.referralCode,
+    );
+    return {
+      success: result.success,
+      message: result.message,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('me/referral/stats')
+  async getReferralStats(@CurrentUser() user: any) {
+    const stats = await this.usersService.getReferralStats(user.uid);
+    return {
+      success: true,
+      data: stats,
+      message: 'Referral stats retrieved successfully',
       timestamp: new Date().toISOString(),
     };
   }

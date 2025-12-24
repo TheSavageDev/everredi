@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { KitTemplatesService } from './kit-templates.service';
 import { UserKitsService } from './user-kits.service';
@@ -372,11 +373,11 @@ export class PublicTemplatesController {
 
   // Admin endpoints for managing public templates
   @Post()
+  @UseGuards(AdminGuard)
   async createPublicTemplate(
     @CurrentUser() user: any,
     @Body() templateData: any,
   ) {
-    // TODO: Add admin check in production
     const template = await this.publicTemplatesService.createPublicTemplate({
       ...templateData,
       createdBy: user.uid,
@@ -390,12 +391,12 @@ export class PublicTemplatesController {
   }
 
   @Put(':id')
+  @UseGuards(AdminGuard)
   async updatePublicTemplate(
     @CurrentUser() user: any,
     @Param('id') id: string,
     @Body() updates: any,
   ) {
-    // TODO: Add admin check in production
     const template = await this.publicTemplatesService.updatePublicTemplate(
       id,
       updates,
@@ -409,11 +410,11 @@ export class PublicTemplatesController {
   }
 
   @Delete(':id')
+  @UseGuards(AdminGuard)
   async deletePublicTemplate(
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    // TODO: Add admin check in production
     await this.publicTemplatesService.deletePublicTemplate(id);
     return {
       success: true,

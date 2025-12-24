@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException, Inject, Logger } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { UsersService } from '../users/users.service';
 
 const logger = new Logger('InventoryService');
 
@@ -23,6 +30,7 @@ export interface InventoryItem {
   notes?: string;
   status: 'active' | 'expired' | 'used' | 'disposed';
   sentNotifications?: string[]; // Array of days for which notifications have been sent (e.g., ['60', '30', '10', '1'])
+  customFields?: Record<string, string | number | boolean | null>; // Custom field values keyed by fieldId
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -31,6 +39,7 @@ export interface InventoryItem {
 export class InventoryService {
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
@@ -90,6 +99,31 @@ export class InventoryService {
     return { id: doc.id, ...doc.data() } as InventoryItem;
   }
 
+  /**
+   * Creates a new inventory item for a user.
+   *
+   * This method:
+   * - Checks if user is premium (premium users have unlimited items)
+   * - For free users, enforces a limit of 100 active inventory items
+   * - Converts date strings to Firestore Timestamps
+   * - Initializes sentNotifications array for items with expiration dates
+   *
+   * @param userId - The ID of the user creating the item
+   * @param itemData - The inventory item data (excluding auto-generated fields)
+   * @returns Promise resolving to the created InventoryItem
+   * @throws ForbiddenException if free user has reached the 100 item limit
+   *
+   * @example
+   * ```typescript
+   * const item = await inventoryService.createInventoryItem('user123', {
+   *   supplyName: 'Bandages',
+   *   locationId: 'loc123',
+   *   quantity: 10,
+   *   status: 'active',
+   *   expirationDate: '2025-12-31'
+   * });
+   * ```
+   */
   async createInventoryItem(
     userId: string,
     itemData: Omit<
@@ -97,6 +131,28 @@ export class InventoryService {
       'id' | 'userId' | 'createdAt' | 'updatedAt' | 'sentNotifications'
     >,
   ): Promise<InventoryItem> {
+    const isPremium = await this.usersService.isPremiumUser(userId);
+
+    if (!isPremium) {
+      const snapshot = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('inventoryItems')
+        .where('status', '==', 'active')
+        .get();
+
+      const activeCount = snapshot.size;
+      const maxFreeItems = 100;
+
+      if (activeCount >= maxFreeItems) {
+        throw new ForbiddenException({
+          code: 'INVENTORY_LIMIT_REACHED',
+          message:
+            'You have reached the free limit of 100 active inventory items. Upgrade to premium for unlimited inventory.',
+        });
+      }
+    }
+
     const now = Timestamp.now();
 
     // Create document reference

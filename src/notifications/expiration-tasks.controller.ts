@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { NotificationsService } from './notifications.service';
 import { PushNotificationService } from './push-notification.service';
 import type { ExpirationTaskPayload } from './cloud-tasks.service';
@@ -29,6 +30,7 @@ export class ExpirationTasksController {
    * This endpoint should be publicly accessible but protected by Cloud Tasks authentication
    */
   @Post('expiration')
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   async handleExpirationTask(@Body() payload: ExpirationTaskPayload) {
     logger.log(

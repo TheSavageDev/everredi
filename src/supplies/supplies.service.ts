@@ -17,6 +17,10 @@ export interface Supply {
   oshaRequired: boolean;
   isActive: boolean;
   affiliateLink?: string; // Optional affiliate link for monetization
+  isSponsored?: boolean; // Admin toggle
+  sponsoredBy?: string; // Brand/partner name
+  sponsoredUntil?: any; // Optional expiration (Timestamp)
+  sponsoredPriority?: number; // For ordering (higher = shown first)
   createdAt: any;
   updatedAt: any;
 }
@@ -37,10 +41,22 @@ export class SuppliesService {
     }
 
     const snapshot = await query.orderBy('name').get();
-    return snapshot.docs.map((doc) => ({
+    const supplies = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     })) as Supply[];
+
+    // Sort: sponsored first (by priority desc), then by name
+    return supplies.sort((a, b) => {
+      if (a.isSponsored && !b.isSponsored) return -1;
+      if (!a.isSponsored && b.isSponsored) return 1;
+      if (a.isSponsored && b.isSponsored) {
+        const priorityA = a.sponsoredPriority || 0;
+        const priorityB = b.sponsoredPriority || 0;
+        if (priorityA !== priorityB) return priorityB - priorityA;
+      }
+      return a.name.localeCompare(b.name);
+    });
   }
 
   async searchSupplies(term: string): Promise<Supply[]> {
@@ -55,12 +71,24 @@ export class SuppliesService {
     })) as Supply[];
 
     const searchTerm = term.toLowerCase();
-    return allSupplies.filter(
+    const filtered = allSupplies.filter(
       (supply) =>
         supply.name.toLowerCase().includes(searchTerm) ||
         supply.description?.toLowerCase().includes(searchTerm) ||
         supply.barcode?.toLowerCase().includes(searchTerm),
     );
+
+    // Sort: sponsored first (by priority desc), then by name
+    return filtered.sort((a, b) => {
+      if (a.isSponsored && !b.isSponsored) return -1;
+      if (!a.isSponsored && b.isSponsored) return 1;
+      if (a.isSponsored && b.isSponsored) {
+        const priorityA = a.sponsoredPriority || 0;
+        const priorityB = b.sponsoredPriority || 0;
+        if (priorityA !== priorityB) return priorityB - priorityA;
+      }
+      return a.name.localeCompare(b.name);
+    });
   }
 
   async getSupply(supplyId: string): Promise<Supply | null> {
@@ -69,5 +97,18 @@ export class SuppliesService {
       return null;
     }
     return { id: doc.id, ...doc.data() } as Supply;
+  }
+
+  async updateSupply(
+    supplyId: string,
+    updates: Partial<Omit<Supply, 'id' | 'createdAt'>>,
+  ): Promise<Supply> {
+    const supplyRef = this.firestore.collection('supplies').doc(supplyId);
+    await supplyRef.update({
+      ...updates,
+      updatedAt: new Date(),
+    });
+    const updatedDoc = await supplyRef.get();
+    return { id: updatedDoc.id, ...updatedDoc.data() } as Supply;
   }
 }

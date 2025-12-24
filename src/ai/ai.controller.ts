@@ -3,6 +3,7 @@ import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiService } from './ai.service';
 import type { AiRecommendationRequest } from './ai.service';
+import { Premium } from '../common/decorators/premium.decorator';
 
 @Controller('ai')
 @UseGuards(FirebaseAuthGuard)
@@ -10,6 +11,7 @@ export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post('recommendations')
+  @Premium()
   async getRecommendation(
     @CurrentUser() user: any,
     @Body() request: AiRecommendationRequest,
@@ -27,6 +29,7 @@ export class AiController {
   }
 
   @Get('recommendations')
+  @Premium()
   async getRecommendations(@CurrentUser() user: any) {
     const recommendations = await this.aiService.getRecommendations(user.uid);
     return {

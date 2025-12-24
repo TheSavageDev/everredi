@@ -1,7 +1,9 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
+import type { auth } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
+import { FIREBASE_AUTH } from '../config/firebase.provider';
 
 export interface User {
   id: string;
@@ -31,6 +33,7 @@ export interface User {
 export class UsersService {
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(FIREBASE_AUTH) private readonly firebaseAuth: auth.Auth,
   ) {}
 
   async createOrUpdateUser(
@@ -133,6 +136,30 @@ export class UsersService {
       return null;
     }
     return { id: userDoc.id, ...userDoc.data() } as User;
+  }
+
+  async searchUserByEmail(email: string): Promise<{ uid: string; email: string; displayName?: string } | null> {
+    try {
+      // Use Firebase Admin Auth to get user by email
+      const userRecord = await this.firebaseAuth.getUserByEmail(email);
+      
+      // Also get the user document from Firestore to get displayName if available
+      const userDoc = await this.firestore.collection('users').doc(userRecord.uid).get();
+      const userData = userDoc.exists ? (userDoc.data() as User) : null;
+      
+      return {
+        uid: userRecord.uid,
+        email: userRecord.email || email,
+        displayName: userData?.displayName || userRecord.displayName || undefined,
+      };
+    } catch (error: any) {
+      // If user not found, return null
+      if (error.code === 'auth/user-not-found') {
+        return null;
+      }
+      // Re-throw other errors
+      throw error;
+    }
   }
 
   async updateUser(userId: string, updates: Partial<User>): Promise<User> {

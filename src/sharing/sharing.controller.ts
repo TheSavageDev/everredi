@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
@@ -23,10 +24,22 @@ export class SharingController {
     @Param('kitId') kitId: string,
     @Body() body: { userId: string; permission: 'view' | 'edit' },
   ) {
+    if (!kitId || !kitId.trim()) {
+      throw new BadRequestException('Kit ID is required');
+    }
+
+    if (!body.userId || !body.userId.trim()) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!body.permission || !['view', 'edit'].includes(body.permission)) {
+      throw new BadRequestException('Permission must be either "view" or "edit"');
+    }
+
     const share = await this.sharingService.shareKitWithUser(
-      kitId,
+      kitId.trim(),
       userId,
-      body.userId,
+      body.userId.trim(),
       body.permission,
     );
     return {
@@ -43,8 +56,16 @@ export class SharingController {
     @Param('kitId') kitId: string,
     @Body() body: { permission: 'view' | 'edit'; expiresInDays?: number },
   ) {
+    if (!kitId || !kitId.trim()) {
+      throw new BadRequestException('Kit ID is required');
+    }
+
+    if (!body.permission || !['view', 'edit'].includes(body.permission)) {
+      throw new BadRequestException('Permission must be either "view" or "edit"');
+    }
+
     const link = await this.sharingService.createShareLink(
-      kitId,
+      kitId.trim(),
       userId,
       body.permission,
       body.expiresInDays,
@@ -64,6 +85,60 @@ export class SharingController {
       success: true,
       data: sharedKits,
       message: 'Shared kits retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('kits/:kitId/permission')
+  async getKitPermission(
+    @CurrentUser('uid') userId: string,
+    @Param('kitId') kitId: string,
+  ) {
+    const permission = await this.sharingService.getKitSharePermission(
+      kitId.trim(),
+      userId,
+    );
+    
+    if (!permission) {
+      return {
+        success: false,
+        message: 'Kit not found or not accessible',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: true,
+      data: permission,
+      message: 'Kit permission retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('kits/:kitId/shares')
+  async getKitShares(
+    @CurrentUser('uid') userId: string,
+    @Param('kitId') kitId: string,
+  ) {
+    if (!kitId || !kitId.trim()) {
+      throw new BadRequestException('Kit ID is required');
+    }
+
+    // Verify user owns the kit
+    const permission = await this.sharingService.getKitSharePermission(
+      kitId.trim(),
+      userId,
+    );
+
+    if (!permission || !permission.isOwner) {
+      throw new BadRequestException('Only kit owners can view shares');
+    }
+
+    const shares = await this.sharingService.getKitShares(kitId.trim(), userId);
+    return {
+      success: true,
+      data: shares,
+      message: 'Kit shares retrieved successfully',
       timestamp: new Date().toISOString(),
     };
   }
@@ -92,6 +167,23 @@ export class SharingController {
     return {
       success: true,
       message: 'Share link revoked successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Delete('kits/:kitId/shared-with-me')
+  async removeSharedKit(
+    @CurrentUser('uid') userId: string,
+    @Param('kitId') kitId: string,
+  ) {
+    if (!kitId || !kitId.trim()) {
+      throw new BadRequestException('Kit ID is required');
+    }
+
+    await this.sharingService.removeSharedKit(kitId.trim(), userId);
+    return {
+      success: true,
+      message: 'Shared kit removed successfully',
       timestamp: new Date().toISOString(),
     };
   }

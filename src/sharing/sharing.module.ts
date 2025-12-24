@@ -1,11 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { SharingController } from './sharing.controller';
 import { SharingService } from './sharing.service';
 import { KitsModule } from '../kits/kits.module';
 import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [KitsModule, UsersModule],
+  imports: [KitsModule, forwardRef(() => UsersModule)],
   controllers: [SharingController],
   providers: [SharingService],
   exports: [SharingService],

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, UseGuards, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, UseGuards, Body, Query, BadRequestException } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
@@ -64,6 +64,30 @@ export class UsersController {
       success: true,
       data: stats,
       message: 'Referral stats retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('search')
+  async searchUser(@Query('email') email: string) {
+    if (!email || !email.trim()) {
+      throw new BadRequestException('Email query parameter is required');
+    }
+
+    const user = await this.usersService.searchUserByEmail(email.trim());
+    
+    if (!user) {
+      return {
+        success: false,
+        message: 'User not found',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: true,
+      data: user,
+      message: 'User found successfully',
       timestamp: new Date().toISOString(),
     };
   }

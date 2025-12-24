@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -62,18 +63,61 @@ export class UserKitsService {
   }
 
   async getUserKit(userId: string, kitId: string): Promise<UserKit> {
-    const doc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .doc(kitId)
-      .get();
-
-    if (!doc.exists) {
-      throw new NotFoundException('User kit not found');
+    if (!userId || !userId.trim()) {
+      throw new BadRequestException('User ID is required');
     }
 
-    return { id: doc.id, ...doc.data() } as UserKit;
+    if (!kitId || !kitId.trim()) {
+      throw new BadRequestException('Kit ID is required');
+    }
+
+    // First, try to get the kit from the user's own collection
+    const doc = await this.firestore
+      .collection('users')
+      .doc(userId.trim())
+      .collection('userKits')
+      .doc(kitId.trim())
+      .get();
+
+    if (doc.exists) {
+      return { id: doc.id, ...doc.data() } as UserKit;
+    }
+
+    // If not found, check if it's shared with this user
+    // Search all users' collections for kits shared with this user
+    const allUsersSnapshot = await this.firestore.collection('users').get();
+
+    for (const userDoc of allUsersSnapshot.docs) {
+      const ownerId = userDoc.id;
+      if (ownerId === userId.trim()) continue; // Skip own kits (already checked)
+
+      // Check if this kit is shared with the user
+      const shareSnapshot = await this.firestore
+        .collection('users')
+        .doc(ownerId)
+        .collection('userKits')
+        .doc(kitId.trim())
+        .collection('sharedWith')
+        .where('sharedWith', '==', userId.trim())
+        .limit(1)
+        .get();
+
+      if (!shareSnapshot.empty) {
+        // Kit is shared with this user, fetch it
+        const kitDoc = await this.firestore
+          .collection('users')
+          .doc(ownerId)
+          .collection('userKits')
+          .doc(kitId.trim())
+          .get();
+
+        if (kitDoc.exists) {
+          return { id: kitDoc.id, ...kitDoc.data() } as UserKit;
+        }
+      }
+    }
+
+    throw new NotFoundException('User kit not found');
   }
 
   async createUserKit(
@@ -255,10 +299,100 @@ export class UserKitsService {
       .collection('userKits')
       .doc(kitId);
 
+    // Get current kit data to check what's changing
+    const currentDoc = await kitRef.get();
+    if (!currentDoc.exists) {
+      throw new NotFoundException('User kit not found');
+    }
+    const currentKit = { id: currentDoc.id, ...currentDoc.data() } as UserKit;
+
+    // Update the kit
     await kitRef.update({
       ...updates,
       updatedAt: Timestamp.now(),
     });
+
+    // If location or name changed, update associated inventory items
+    const locationChanged =
+      updates.locationId !== undefined &&
+      updates.locationId !== currentKit.locationId;
+    const nameChanged =
+      updates.name !== undefined && updates.name !== currentKit.name;
+    const locationNameChanged =
+      updates.locationName !== undefined &&
+      updates.locationName !== currentKit.locationName;
+
+    if (locationChanged || nameChanged || locationNameChanged) {
+      try {
+        // Find all inventory items linked to this kit
+        const inventorySnapshot = await this.firestore
+          .collection('users')
+          .doc(userId)
+          .collection('inventoryItems')
+          .where('kitId', '==', kitId)
+          .get();
+
+        if (!inventorySnapshot.empty) {
+          const batch = this.firestore.batch();
+          const updateData: Record<string, unknown> = {
+            updatedAt: Timestamp.now(),
+          };
+
+          // Update location if it changed
+          if (locationChanged && updates.locationId) {
+            updateData.locationId = updates.locationId;
+
+            // If locationName wasn't provided, fetch it from Firestore
+            if (!updates.locationName) {
+              try {
+                const locationDoc = await this.firestore
+                  .collection('users')
+                  .doc(userId)
+                  .collection('locations')
+                  .doc(updates.locationId)
+                  .get();
+
+                if (locationDoc.exists) {
+                  const locationData = locationDoc.data();
+                  updateData.locationName = locationData?.name || null;
+                }
+              } catch (error) {
+                console.error(
+                  `Failed to fetch location name for ${updates.locationId}:`,
+                  error,
+                );
+                // Continue without locationName
+              }
+            } else {
+              updateData.locationName = updates.locationName;
+            }
+          } else if (locationNameChanged && updates.locationName) {
+            updateData.locationName = updates.locationName;
+          }
+
+          // Update kit name if it changed
+          if (nameChanged && updates.name) {
+            updateData.kitName = updates.name;
+          }
+
+          // Update all inventory items in batch
+          inventorySnapshot.docs.forEach((doc) => {
+            batch.update(doc.ref, updateData);
+          });
+
+          await batch.commit();
+          console.log(
+            `Updated ${inventorySnapshot.docs.length} inventory items for kit ${kitId}`,
+          );
+        }
+      } catch (error) {
+        // Log error but don't fail the kit update
+        console.error(
+          `Failed to update inventory items for kit ${kitId}:`,
+          error,
+        );
+      }
+    }
 
     const doc = await kitRef.get();
     if (!doc.exists) {
@@ -287,13 +421,48 @@ export class UserKitsService {
     userId: string,
     userKitId: string,
   ): Promise<KitItemInstance[]> {
-    const snapshot = await this.firestore
+    // First, try to get items from the user's own kit
+    let snapshot = await this.firestore
       .collection('users')
-      .doc(userId)
+      .doc(userId.trim())
       .collection('userKits')
-      .doc(userKitId)
+      .doc(userKitId.trim())
       .collection('kitItems')
       .get();
+
+    // If not found, check if it's a shared kit
+    if (snapshot.empty) {
+      // Find the owner of this shared kit
+      const allUsersSnapshot = await this.firestore.collection('users').get();
+
+      for (const userDoc of allUsersSnapshot.docs) {
+        const ownerId = userDoc.id;
+        if (ownerId === userId.trim()) continue; // Skip own kits (already checked)
+
+        // Check if this kit is shared with the user
+        const shareSnapshot = await this.firestore
+          .collection('users')
+          .doc(ownerId)
+          .collection('userKits')
+          .doc(userKitId.trim())
+          .collection('sharedWith')
+          .where('sharedWith', '==', userId.trim())
+          .limit(1)
+          .get();
+
+        if (!shareSnapshot.empty) {
+          // Kit is shared, get items from owner's collection
+          snapshot = await this.firestore
+            .collection('users')
+            .doc(ownerId)
+            .collection('userKits')
+            .doc(userKitId.trim())
+            .collection('kitItems')
+            .get();
+          break;
+        }
+      }
+    }
 
     return snapshot.docs.map((doc) => ({
       id: doc.id,

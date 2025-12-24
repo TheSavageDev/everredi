@@ -59,6 +59,6 @@ options:
 substitutions:
   _ENV: 'staging'
   _DATABASE_ID: 'staging'
-  _CORS_ORIGIN: 'https://staging.everredi.com'
+  _CORS_ORIGIN: 'https://staging.everredi.app'
 
 timeout: '1200s'

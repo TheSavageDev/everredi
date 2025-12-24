@@ -89,11 +89,16 @@ export function getFirestore(): admin.firestore.Firestore {
   }
   // Get database ID from environment or use default
   const databaseId = process.env.FIREBASE_DATABASE_ID || '(default)';
-  // Note: Firebase Admin SDK v13+ supports multiple databases via app.firestore(databaseId)
-  // For now, we use the default database. To use named databases, you may need to
-  // initialize separate app instances or use a different approach based on SDK version.
-  // The databaseId is logged for reference but currently uses default database.
-  return admin.firestore(firebaseAdminInstance);
+  
+  // Firebase Admin SDK v13+ supports multiple Firestore databases
+  // For named databases, call app.firestore(databaseId) directly
+  // For default database, call app.firestore() with no arguments
+  if (databaseId === '(default)') {
+    return firebaseAdminInstance.firestore();
+  }
+  // For named Firestore databases, pass the databaseId to app.firestore()
+  // TypeScript types may not reflect this, so we use type assertion
+  return (firebaseAdminInstance.firestore as any)(databaseId);
 }
 
 export function getAuth(): admin.auth.Auth {

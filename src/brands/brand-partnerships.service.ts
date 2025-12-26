@@ -51,7 +51,7 @@ export class BrandPartnershipsService {
     categoryIds?: string[],
   ): Promise<BrandPartnership[]> {
     const now = Timestamp.now();
-    let query = this.firestore
+    const query = this.firestore
       .collection('brandPartnerships')
       .where('isActive', '==', true)
       .where('startDate', '<=', now);

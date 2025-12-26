@@ -73,17 +73,22 @@ async function bootstrap() {
 
     // Cloud Run sets PORT automatically, default to 8080
     const port = process.env.PORT || 8080;
-    
+
     console.log(`📡 Starting server on port ${port}...`);
     await app.listen(port);
-    
+
     console.log(`✅ Application is running on port ${port}/api`);
     console.log(`🌐 CORS enabled for origin: ${corsOrigin}`);
-    console.log(`🏥 Health check available at: http://0.0.0.0:${port}/api/health`);
+    console.log(
+      `🏥 Health check available at: http://0.0.0.0:${port}/api/health`,
+    );
   } catch (error) {
     console.error('❌ Failed to start application:', error);
-    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
-    
+    console.error(
+      'Stack trace:',
+      error instanceof Error ? error.stack : 'No stack trace',
+    );
+
     // Capture startup errors in Sentry
     Sentry.captureException(error, {
       level: 'fatal',
@@ -91,14 +96,14 @@ async function bootstrap() {
         phase: 'bootstrap',
       },
     });
-    
+
     process.exit(1);
   }
 }
 
 bootstrap().catch((error) => {
   console.error('❌ Unhandled error during bootstrap:', error);
-  
+
   // Capture unhandled bootstrap errors
   Sentry.captureException(error, {
     level: 'fatal',
@@ -106,6 +111,6 @@ bootstrap().catch((error) => {
       phase: 'bootstrap',
     },
   });
-  
+
   process.exit(1);
 });

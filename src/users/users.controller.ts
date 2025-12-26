@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Put, UseGuards, Body, Query, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  UseGuards,
+  Body,
+  Query,
+  BadRequestException,
+} from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
@@ -75,7 +84,7 @@ export class UsersController {
     }
 
     const user = await this.usersService.searchUserByEmail(email.trim());
-    
+
     if (!user) {
       return {
         success: false,

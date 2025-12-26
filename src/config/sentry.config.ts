@@ -26,12 +26,9 @@ export function initializeSentry(configService: ConfigService): void {
       environment,
       release,
       tracesSampleRate,
-      integrations: [
-        // Enable HTTP instrumentation for API calls
-        new Sentry.Integrations.Http({ tracing: true }),
-      ],
+      // HTTP instrumentation is enabled by default in Sentry v8 when tracesSampleRate is set
       // Filter out sensitive data
-      beforeSend(event, hint) {
+      beforeSend(event) {
         // Remove sensitive data from event
         if (event.request) {
           // Remove authorization headers
@@ -47,13 +44,21 @@ export function initializeSentry(configService: ConfigService): void {
           // Remove sensitive query parameters
           if (event.request.query_string) {
             const queryString = event.request.query_string;
-            // Remove common sensitive params
-            const sensitiveParams = ['token', 'api_key', 'password', 'secret'];
-            sensitiveParams.forEach((param) => {
-              if (queryString.includes(param)) {
+            // query_string can be a string or array of [key, value] tuples
+            if (typeof queryString === 'string') {
+              // Remove common sensitive params
+              const sensitiveParams = [
+                'token',
+                'api_key',
+                'password',
+                'secret',
+              ];
+              if (
+                sensitiveParams.some((param) => queryString.includes(param))
+              ) {
                 event.request.query_string = '[Filtered]';
               }
-            });
+            }
           }
         }
 
@@ -79,4 +84,3 @@ export function initializeSentry(configService: ConfigService): void {
     console.warn('   Continuing without Sentry...');
   }
 }
-

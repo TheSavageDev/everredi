@@ -33,7 +33,9 @@ export class SharingController {
     }
 
     if (!body.permission || !['view', 'edit'].includes(body.permission)) {
-      throw new BadRequestException('Permission must be either "view" or "edit"');
+      throw new BadRequestException(
+        'Permission must be either "view" or "edit"',
+      );
     }
 
     const share = await this.sharingService.shareKitWithUser(
@@ -61,7 +63,9 @@ export class SharingController {
     }
 
     if (!body.permission || !['view', 'edit'].includes(body.permission)) {
-      throw new BadRequestException('Permission must be either "view" or "edit"');
+      throw new BadRequestException(
+        'Permission must be either "view" or "edit"',
+      );
     }
 
     const link = await this.sharingService.createShareLink(
@@ -98,7 +102,7 @@ export class SharingController {
       kitId.trim(),
       userId,
     );
-    
+
     if (!permission) {
       return {
         success: false,
@@ -188,5 +192,3 @@ export class SharingController {
     };
   }
 }
-
-

@@ -16,6 +16,8 @@ export interface KitTemplate {
   isPublic: boolean;
   isAiGenerated: boolean;
   aiPrompt?: string;
+  defaultPeopleCount?: number; // Default: 1
+  peopleCountOptions?: number[]; // e.g., [2, 4, 8] - additional options beyond default
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -66,16 +68,19 @@ export class KitTemplatesService {
     >,
   ): Promise<KitTemplate> {
     const now = Timestamp.now();
+    // Set defaultPeopleCount to 1 if not provided
+    const templateDataWithDefaults = {
+      ...templateData,
+      defaultPeopleCount: templateData.defaultPeopleCount ?? 1,
+      userId,
+      createdAt: now,
+      updatedAt: now,
+    };
     const docRef = await this.firestore
       .collection('users')
       .doc(userId)
       .collection('kitTemplates')
-      .add({
-        ...templateData,
-        userId,
-        createdAt: now,
-        updatedAt: now,
-      });
+      .add(templateDataWithDefaults);
 
     const doc = await docRef.get();
     const template = { id: doc.id, ...doc.data() } as KitTemplate;
@@ -89,6 +94,8 @@ export class KitTemplatesService {
         groupSize: template.groupSize,
         environment: template.environment,
         skillLevel: template.skillLevel,
+        defaultPeopleCount: template.defaultPeopleCount ?? 1,
+        peopleCountOptions: template.peopleCountOptions,
         createdBy: userId,
         publicTemplateId: `${userId}/${template.id}`,
       });
@@ -148,6 +155,8 @@ export class KitTemplatesService {
             groupSize: templateData.groupSize,
             environment: templateData.environment,
             skillLevel: templateData.skillLevel,
+            defaultPeopleCount: templateData.defaultPeopleCount ?? 1,
+            peopleCountOptions: templateData.peopleCountOptions,
           },
         );
       } else {
@@ -159,6 +168,8 @@ export class KitTemplatesService {
           groupSize: templateData.groupSize,
           environment: templateData.environment,
           skillLevel: templateData.skillLevel,
+          defaultPeopleCount: templateData.defaultPeopleCount ?? 1,
+          peopleCountOptions: templateData.peopleCountOptions,
           createdBy: userId,
           publicTemplateId: `${userId}/${templateId}`,
         });
@@ -200,6 +211,8 @@ export class KitTemplatesService {
             groupSize: templateData.groupSize,
             environment: templateData.environment,
             skillLevel: templateData.skillLevel,
+            defaultPeopleCount: templateData.defaultPeopleCount ?? 1,
+            peopleCountOptions: templateData.peopleCountOptions,
           },
         );
       }
@@ -224,9 +237,36 @@ export class KitTemplatesService {
     await templateRef.delete();
   }
 
+  /**
+   * Calculate item quantity based on people count
+   */
+  private calculateItemQuantity(
+    item: any,
+    selectedPeopleCount: number,
+    defaultPeopleCount: number,
+  ): number {
+    // If explicit quantity exists for this people count, use it
+    if (
+      item.peopleCountQuantities &&
+      item.peopleCountQuantities[selectedPeopleCount] !== undefined
+    ) {
+      return item.peopleCountQuantities[selectedPeopleCount];
+    }
+
+    // If item scales with people, multiply base quantity
+    if (item.scalesWithPeople === true) {
+      const multiplier = selectedPeopleCount / defaultPeopleCount;
+      return Math.ceil(item.quantity * multiplier);
+    }
+
+    // Otherwise, use base quantity unchanged
+    return item.quantity;
+  }
+
   async getTemplateItems(
     userId: string,
     templateId: string,
+    selectedPeopleCount?: number,
   ): Promise<
     Array<{
       supplyId: string;
@@ -246,6 +286,10 @@ export class KitTemplatesService {
       throw new NotFoundException('Kit template not found');
     }
 
+    const template = templateDoc.data() as KitTemplate;
+    const defaultPeopleCount = template.defaultPeopleCount ?? 1;
+    const peopleCount = selectedPeopleCount ?? defaultPeopleCount;
+
     const itemsSnapshot = await templateRef
       .collection('kitItems')
       .orderBy('sortOrder')
@@ -253,10 +297,15 @@ export class KitTemplatesService {
 
     return itemsSnapshot.docs.map((doc) => {
       const data = doc.data();
+      const quantity = this.calculateItemQuantity(
+        data,
+        peopleCount,
+        defaultPeopleCount,
+      );
       return {
         supplyId: data.supplyId,
         supplyName: data.supplyName,
-        quantity: data.quantity,
+        quantity,
         notes: data.notes,
       };
     });

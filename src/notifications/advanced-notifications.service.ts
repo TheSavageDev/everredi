@@ -247,5 +247,3 @@ export class AdvancedNotificationsService {
     return { userId, ...doc.data() } as NotificationPreferences;
   }
 }
-
-

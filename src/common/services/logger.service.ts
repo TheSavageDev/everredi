@@ -75,4 +75,3 @@ export class LoggerService implements NestLoggerService {
     this.logger.verbose(message, ...optionalParams);
   }
 }
-

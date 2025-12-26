@@ -51,8 +51,9 @@ export class SharingService {
     }
 
     // Ensure ownerId is a string
-    const ownerIdStr = typeof ownerId === 'string' ? ownerId : String(ownerId || '');
-    
+    const ownerIdStr =
+      typeof ownerId === 'string' ? ownerId : String(ownerId || '');
+
     if (!ownerIdStr || !ownerIdStr.trim()) {
       throw new BadRequestException('Owner ID is required');
     }
@@ -62,7 +63,10 @@ export class SharingService {
     }
 
     // Verify kit exists and belongs to owner
-    const kit = await this.userKitsService.getUserKit(ownerIdStr.trim(), kitId.trim());
+    const kit = await this.userKitsService.getUserKit(
+      ownerIdStr.trim(),
+      kitId.trim(),
+    );
     if (!kit) {
       throw new NotFoundException('Kit not found');
     }
@@ -86,7 +90,12 @@ export class SharingService {
         sharedAt: Timestamp.now(),
       });
       const updated = await existingDoc.ref.get();
-      return { id: updated.id, kitId: kitId.trim(), ownerId: ownerIdStr.trim(), ...updated.data() } as SharedKit;
+      return {
+        id: updated.id,
+        kitId: kitId.trim(),
+        ownerId: ownerIdStr.trim(),
+        ...updated.data(),
+      } as SharedKit;
     }
 
     // Create new share
@@ -105,7 +114,12 @@ export class SharingService {
       });
 
     const shareDoc = await shareRef.get();
-    return { id: shareDoc.id, kitId: kitId.trim(), ownerId: ownerIdStr.trim(), ...shareDoc.data() } as SharedKit;
+    return {
+      id: shareDoc.id,
+      kitId: kitId.trim(),
+      ownerId: ownerIdStr.trim(),
+      ...shareDoc.data(),
+    } as SharedKit;
   }
 
   async createShareLink(
@@ -119,14 +133,18 @@ export class SharingService {
     }
 
     // Ensure ownerId is a string
-    const ownerIdStr = typeof ownerId === 'string' ? ownerId : String(ownerId || '');
-    
+    const ownerIdStr =
+      typeof ownerId === 'string' ? ownerId : String(ownerId || '');
+
     if (!ownerIdStr || !ownerIdStr.trim()) {
       throw new BadRequestException('Owner ID is required');
     }
 
     // Verify kit exists
-    const kit = await this.userKitsService.getUserKit(ownerIdStr.trim(), kitId.trim());
+    const kit = await this.userKitsService.getUserKit(
+      ownerIdStr.trim(),
+      kitId.trim(),
+    );
     if (!kit) {
       throw new NotFoundException('Kit not found');
     }
@@ -170,12 +188,24 @@ export class SharingService {
     } as SharedKitLink;
   }
 
-  async getSharedKits(
-    userId: string,
-  ): Promise<Array<Omit<SharedKit, 'sharedAt' | 'createdAt'> & { sharedAt: string; createdAt: string; kitName: string }>> {
+  async getSharedKits(userId: string): Promise<
+    Array<
+      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
+        sharedAt: string;
+        createdAt: string;
+        kitName: string;
+      }
+    >
+  > {
     // Find all kits shared with this user
     const allUsersSnapshot = await this.firestore.collection('users').get();
-    const sharedKits: Array<Omit<SharedKit, 'sharedAt' | 'createdAt'> & { sharedAt: string; createdAt: string; kitName: string }> = [];
+    const sharedKits: Array<
+      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
+        sharedAt: string;
+        createdAt: string;
+        kitName: string;
+      }
+    > = [];
 
     for (const userDoc of allUsersSnapshot.docs) {
       const ownerId = userDoc.id;
@@ -200,18 +230,22 @@ export class SharingService {
         if (!sharesSnapshot.empty) {
           const share = sharesSnapshot.docs[0].data() as any;
           const kit = kitDoc.data();
-          
+
           // Convert Firestore Timestamps to ISO strings
           const sharedAtTimestamp = share.sharedAt as Timestamp | undefined;
           const createdAtTimestamp = share.createdAt as Timestamp | undefined;
-          
-          const sharedAt = sharedAtTimestamp 
-            ? (sharedAtTimestamp.toDate ? sharedAtTimestamp.toDate().toISOString() : new Date(sharedAtTimestamp.toMillis()).toISOString())
+
+          const sharedAt = sharedAtTimestamp
+            ? sharedAtTimestamp.toDate
+              ? sharedAtTimestamp.toDate().toISOString()
+              : new Date(sharedAtTimestamp.toMillis()).toISOString()
             : new Date().toISOString();
           const createdAt = createdAtTimestamp
-            ? (createdAtTimestamp.toDate ? createdAtTimestamp.toDate().toISOString() : new Date(createdAtTimestamp.toMillis()).toISOString())
+            ? createdAtTimestamp.toDate
+              ? createdAtTimestamp.toDate().toISOString()
+              : new Date(createdAtTimestamp.toMillis()).toISOString()
             : new Date().toISOString();
-          
+
           sharedKits.push({
             id: sharesSnapshot.docs[0].id,
             kitId: kitDoc.id,
@@ -235,10 +269,10 @@ export class SharingService {
   ): Promise<{ isOwner: boolean; permission?: 'view' | 'edit' } | null> {
     // First check if user owns the kit
     const allUsersSnapshot = await this.firestore.collection('users').get();
-    
+
     for (const userDoc of allUsersSnapshot.docs) {
       const ownerId = userDoc.id;
-      
+
       // Check if this is the user's own kit
       if (ownerId === userId.trim()) {
         const kitDoc = await this.firestore
@@ -247,12 +281,12 @@ export class SharingService {
           .collection('userKits')
           .doc(kitId.trim())
           .get();
-        
+
         if (kitDoc.exists) {
           return { isOwner: true };
         }
       }
-      
+
       // Check if kit is shared with this user
       const shareSnapshot = await this.firestore
         .collection('users')
@@ -263,7 +297,7 @@ export class SharingService {
         .where('sharedWith', '==', userId.trim())
         .limit(1)
         .get();
-      
+
       if (!shareSnapshot.empty) {
         const share = shareSnapshot.docs[0].data();
         return {
@@ -272,14 +306,23 @@ export class SharingService {
         };
       }
     }
-    
+
     return null; // Kit not found or not shared
   }
 
   async getKitShares(
     kitId: string,
     ownerId: string,
-  ): Promise<Array<Omit<SharedKit, 'sharedAt' | 'createdAt'> & { sharedAt: string; createdAt: string; sharedWithEmail?: string; sharedWithDisplayName?: string }>> {
+  ): Promise<
+    Array<
+      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
+        sharedAt: string;
+        createdAt: string;
+        sharedWithEmail?: string;
+        sharedWithDisplayName?: string;
+      }
+    >
+  > {
     const sharesSnapshot = await this.firestore
       .collection('users')
       .doc(ownerId.trim())
@@ -288,27 +331,40 @@ export class SharingService {
       .collection('sharedWith')
       .get();
 
-    const shares: Array<Omit<SharedKit, 'sharedAt' | 'createdAt'> & { sharedAt: string; createdAt: string; sharedWithEmail?: string; sharedWithDisplayName?: string }> = [];
+    const shares: Array<
+      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
+        sharedAt: string;
+        createdAt: string;
+        sharedWithEmail?: string;
+        sharedWithDisplayName?: string;
+      }
+    > = [];
 
     for (const shareDoc of sharesSnapshot.docs) {
       const share = shareDoc.data() as any;
-      
+
       // Convert Firestore Timestamps to ISO strings
       const sharedAtTimestamp = share.sharedAt as Timestamp | undefined;
       const createdAtTimestamp = share.createdAt as Timestamp | undefined;
-      
+
       const sharedAt = sharedAtTimestamp
-        ? (sharedAtTimestamp.toDate ? sharedAtTimestamp.toDate().toISOString() : new Date(sharedAtTimestamp.toMillis()).toISOString())
+        ? sharedAtTimestamp.toDate
+          ? sharedAtTimestamp.toDate().toISOString()
+          : new Date(sharedAtTimestamp.toMillis()).toISOString()
         : new Date().toISOString();
       const createdAt = createdAtTimestamp
-        ? (createdAtTimestamp.toDate ? createdAtTimestamp.toDate().toISOString() : new Date(createdAtTimestamp.toMillis()).toISOString())
+        ? createdAtTimestamp.toDate
+          ? createdAtTimestamp.toDate().toISOString()
+          : new Date(createdAtTimestamp.toMillis()).toISOString()
         : new Date().toISOString();
 
       // Get user info for the sharedWith user
       let sharedWithEmail: string | undefined;
       let sharedWithDisplayName: string | undefined;
       try {
-        const sharedWithUser = await this.usersService.getUserById(share.sharedWith);
+        const sharedWithUser = await this.usersService.getUserById(
+          share.sharedWith,
+        );
         if (sharedWithUser) {
           sharedWithEmail = sharedWithUser.email;
           sharedWithDisplayName = sharedWithUser.displayName;
@@ -349,18 +405,15 @@ export class SharingService {
       .delete();
   }
 
-  async removeSharedKit(
-    kitId: string,
-    userId: string,
-  ): Promise<void> {
+  async removeSharedKit(kitId: string, userId: string): Promise<void> {
     // Find the share document where this user is the recipient
     // We need to search across all users to find the owner
     const allUsersSnapshot = await this.firestore.collection('users').get();
-    
+
     for (const userDoc of allUsersSnapshot.docs) {
       const ownerId = userDoc.id;
       if (ownerId === userId.trim()) continue; // Skip own kits
-      
+
       const shareSnapshot = await this.firestore
         .collection('users')
         .doc(ownerId)
@@ -370,14 +423,14 @@ export class SharingService {
         .where('sharedWith', '==', userId.trim())
         .limit(1)
         .get();
-      
+
       if (!shareSnapshot.empty) {
         // Found the share, delete it
         await shareSnapshot.docs[0].ref.delete();
         return;
       }
     }
-    
+
     throw new NotFoundException('Shared kit not found');
   }
 
@@ -403,5 +456,3 @@ export class SharingService {
     );
   }
 }
-
-

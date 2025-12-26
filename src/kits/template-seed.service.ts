@@ -283,6 +283,7 @@ export class TemplateSeedService {
         // Create the public template first
         const publicTemplate =
           await this.publicTemplatesService.createPublicTemplate({
+            defaultPeopleCount: 1,
             name: template.name,
             description: template.description,
             purpose: template.purpose,

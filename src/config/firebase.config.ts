@@ -89,7 +89,7 @@ export function getFirestore(): admin.firestore.Firestore {
   }
   // Get database ID from environment or use default
   const databaseId = process.env.FIREBASE_DATABASE_ID || '(default)';
-  
+
   // Firebase Admin SDK v13+ supports multiple Firestore databases
   // For named databases, call app.firestore(databaseId) directly
   // For default database, call app.firestore() with no arguments

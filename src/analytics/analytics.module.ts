@@ -10,5 +10,3 @@ import { UsersModule } from '../users/users.module';
   exports: [AnalyticsService],
 })
 export class AnalyticsModule {}
-
-

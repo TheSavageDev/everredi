@@ -12,5 +12,3 @@ import { KitsModule } from '../kits/kits.module';
   exports: [BulkOperationsService],
 })
 export class BulkOperationsModule {}
-
-

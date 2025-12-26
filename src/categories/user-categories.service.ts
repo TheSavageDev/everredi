@@ -150,5 +150,3 @@ export class UserCategoriesService {
     await batch.commit();
   }
 }
-
-

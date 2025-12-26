@@ -4,10 +4,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ThrottlerGuard,
-  ThrottlerLimitDetail,
-} from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
 
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
@@ -70,4 +67,3 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     );
   }
 }
-

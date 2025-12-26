@@ -268,5 +268,3 @@ export class TeamsService {
     await this.firestore.collection('teams').doc(teamId).delete();
   }
 }
-
-

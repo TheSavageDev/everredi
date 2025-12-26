@@ -48,13 +48,16 @@ export class LoggingInterceptor implements NestInterceptor {
 
         // Log slow requests
         if (duration > 1000) {
-          Sentry.captureMessage(`Slow request: ${method} ${url} took ${duration}ms`, {
-            level: 'warning',
-            tags: {
-              slowRequest: 'true',
-              duration: duration.toString(),
+          Sentry.captureMessage(
+            `Slow request: ${method} ${url} took ${duration}ms`,
+            {
+              level: 'warning',
+              tags: {
+                slowRequest: 'true',
+                duration: duration.toString(),
+              },
             },
-          });
+          );
         }
       }),
       catchError((error) => {
@@ -78,4 +81,3 @@ export class LoggingInterceptor implements NestInterceptor {
     );
   }
 }
-

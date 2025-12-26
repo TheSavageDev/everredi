@@ -14,6 +14,8 @@ export interface PublicKitTemplate {
   isActive: boolean;
   createdBy?: string; // userId who created it, or 'system' for default templates
   publicTemplateId?: string; // Reference to user template if synced from user
+  defaultPeopleCount?: number; // Default: 1
+  peopleCountOptions?: number[]; // e.g., [2, 4, 8] - additional options beyond default
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -136,7 +138,36 @@ export class PublicTemplatesService {
     return { id: doc.id, ...doc.data() } as PublicKitTemplate;
   }
 
-  async getPublicTemplateItems(templateId: string): Promise<
+  /**
+   * Calculate item quantity based on people count
+   */
+  private calculateItemQuantity(
+    item: any,
+    selectedPeopleCount: number,
+    defaultPeopleCount: number,
+  ): number {
+    // If explicit quantity exists for this people count, use it
+    if (
+      item.peopleCountQuantities &&
+      item.peopleCountQuantities[selectedPeopleCount] !== undefined
+    ) {
+      return item.peopleCountQuantities[selectedPeopleCount];
+    }
+
+    // If item scales with people, multiply base quantity
+    if (item.scalesWithPeople === true) {
+      const multiplier = selectedPeopleCount / defaultPeopleCount;
+      return Math.ceil(item.quantity * multiplier);
+    }
+
+    // Otherwise, use base quantity unchanged
+    return item.quantity;
+  }
+
+  async getPublicTemplateItems(
+    templateId: string,
+    selectedPeopleCount?: number,
+  ): Promise<
     Array<{
       supplyId: string;
       supplyName?: string;
@@ -153,6 +184,10 @@ export class PublicTemplatesService {
       throw new NotFoundException('Public kit template not found');
     }
 
+    const template = templateDoc.data() as PublicKitTemplate;
+    const defaultPeopleCount = template.defaultPeopleCount ?? 1;
+    const peopleCount = selectedPeopleCount ?? defaultPeopleCount;
+
     const itemsSnapshot = await templateRef
       .collection('kitItems')
       .orderBy('sortOrder')
@@ -160,10 +195,15 @@ export class PublicTemplatesService {
 
     return itemsSnapshot.docs.map((doc) => {
       const data = doc.data();
+      const quantity = this.calculateItemQuantity(
+        data,
+        peopleCount,
+        defaultPeopleCount,
+      );
       return {
         supplyId: data.supplyId,
         supplyName: data.supplyName,
-        quantity: data.quantity,
+        quantity,
         notes: data.notes,
       };
     });

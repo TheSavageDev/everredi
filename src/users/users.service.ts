@@ -138,19 +138,25 @@ export class UsersService {
     return { id: userDoc.id, ...userDoc.data() } as User;
   }
 
-  async searchUserByEmail(email: string): Promise<{ uid: string; email: string; displayName?: string } | null> {
+  async searchUserByEmail(
+    email: string,
+  ): Promise<{ uid: string; email: string; displayName?: string } | null> {
     try {
       // Use Firebase Admin Auth to get user by email
       const userRecord = await this.firebaseAuth.getUserByEmail(email);
-      
+
       // Also get the user document from Firestore to get displayName if available
-      const userDoc = await this.firestore.collection('users').doc(userRecord.uid).get();
+      const userDoc = await this.firestore
+        .collection('users')
+        .doc(userRecord.uid)
+        .get();
       const userData = userDoc.exists ? (userDoc.data() as User) : null;
-      
+
       return {
         uid: userRecord.uid,
         email: userRecord.email || email,
-        displayName: userData?.displayName || userRecord.displayName || undefined,
+        displayName:
+          userData?.displayName || userRecord.displayName || undefined,
       };
     } catch (error: any) {
       // If user not found, return null

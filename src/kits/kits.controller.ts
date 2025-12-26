@@ -133,6 +133,7 @@ export class UserKitsController {
       locationName?: string;
       includeItems: boolean;
       isPublicTemplate?: boolean;
+      selectedPeopleCount?: number;
     },
   ) {
     // Always get template items (for both empty and fully loaded kits)
@@ -151,9 +152,10 @@ export class UserKitsController {
         templateItems =
           await this.publicTemplatesService.getPublicTemplateItems(
             body.templateId,
+            body.selectedPeopleCount,
           );
         console.log(
-          `Found ${templateItems.length} items in public template ${body.templateId}`,
+          `Found ${templateItems.length} items in public template ${body.templateId}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
       } catch (error: any) {
         console.warn(
@@ -168,9 +170,10 @@ export class UserKitsController {
         templateItems = await this.templatesService.getTemplateItems(
           user.uid,
           body.templateId,
+          body.selectedPeopleCount,
         );
         console.log(
-          `Found ${templateItems.length} items in user template ${body.templateId} for user ${user.uid}`,
+          `Found ${templateItems.length} items in user template ${body.templateId} for user ${user.uid}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
       } catch (error: any) {
         console.error(

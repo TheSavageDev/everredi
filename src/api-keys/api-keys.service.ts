@@ -158,5 +158,3 @@ export class ApiKeysService {
     return crypto.createHash('sha256').update(key).digest('hex');
   }
 }
-
-

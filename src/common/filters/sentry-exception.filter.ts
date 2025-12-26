@@ -91,7 +91,13 @@ export class SentryExceptionFilter implements ExceptionFilter {
     }
 
     const sanitized = { ...body };
-    const sensitiveFields = ['password', 'token', 'apiKey', 'secret', 'privateKey'];
+    const sensitiveFields = [
+      'password',
+      'token',
+      'apiKey',
+      'secret',
+      'privateKey',
+    ];
 
     sensitiveFields.forEach((field) => {
       if (sanitized[field]) {
@@ -102,4 +108,3 @@ export class SentryExceptionFilter implements ExceptionFilter {
     return sanitized;
   }
 }
-

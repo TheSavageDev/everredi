@@ -10,5 +10,3 @@ import { UsersModule } from '../users/users.module';
   exports: [SupportService],
 })
 export class SupportModule {}
-
-

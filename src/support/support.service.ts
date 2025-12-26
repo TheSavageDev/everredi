@@ -128,5 +128,3 @@ export class SupportService {
     return { id: updatedDoc.id, userId, ...updatedDoc.data() } as SupportTicket;
   }
 }
-
-

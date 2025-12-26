@@ -2,6 +2,9 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { EnvValidationService } from './config/env-validation.service';
+import { ConfigService } from '@nestjs/config';
+import { initializeSentry } from './config/sentry.config';
+import * as Sentry from '@sentry/node';
 
 async function bootstrap() {
   try {
@@ -12,6 +15,10 @@ async function bootstrap() {
     const app = await NestFactory.create(AppModule, {
       logger: ['error', 'warn', 'log', 'debug', 'verbose'],
     });
+
+    // Initialize Sentry before other services
+    const configService = app.get(ConfigService);
+    initializeSentry(configService);
 
     // Validate environment variables
     try {
@@ -76,11 +83,29 @@ async function bootstrap() {
   } catch (error) {
     console.error('❌ Failed to start application:', error);
     console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    
+    // Capture startup errors in Sentry
+    Sentry.captureException(error, {
+      level: 'fatal',
+      tags: {
+        phase: 'bootstrap',
+      },
+    });
+    
     process.exit(1);
   }
 }
 
 bootstrap().catch((error) => {
   console.error('❌ Unhandled error during bootstrap:', error);
+  
+  // Capture unhandled bootstrap errors
+  Sentry.captureException(error, {
+    level: 'fatal',
+    tags: {
+      phase: 'bootstrap',
+    },
+  });
+  
   process.exit(1);
 });

@@ -10,6 +10,3 @@ import { FirebaseModule } from '../config/firebase.module';
   exports: [AffiliateTrackingService],
 })
 export class AffiliateModule {}
-
-
-

@@ -49,6 +49,3 @@ export class PremiumGuard implements CanActivate {
     return true;
   }
 }
-
-
-

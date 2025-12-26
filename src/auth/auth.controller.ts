@@ -1,20 +1,46 @@
-import { Controller, Post, UseGuards, Body } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req, Logger } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
+import type { Request } from 'express';
+
+interface FirebaseUser {
+  uid: string;
+  email?: string;
+  name?: string;
+}
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly authService: AuthService) {}
 
   @Post('create-or-update')
   @UseGuards(FirebaseAuthGuard)
-  async createOrUpdateUser(@CurrentUser() user: any) {
+  @Throttle({ default: { limit: 20, ttl: 3600000 } }) // 20 requests per hour (more restrictive than default)
+  async createOrUpdateUser(
+    @CurrentUser() user: FirebaseUser,
+    @Req() request: Request,
+  ) {
+    // Log auth attempt for security monitoring
+    const ip =
+      request.ip ||
+      request.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
+      'unknown';
+    this.logger.log(
+      `Auth sync attempt: user=${user.uid}, email=${user.email || 'no-email'}, ip=${ip}`,
+    );
+
     const userData = await this.authService.createOrUpdateUser(
       user.uid,
-      user.email,
+      user.email || '',
       user.name,
     );
+
+    this.logger.log(`Auth sync successful: user=${user.uid}`);
+
     return {
       success: true,
       data: userData,

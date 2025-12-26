@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from './config/config.module';
@@ -29,6 +29,8 @@ import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { BrandPartnershipsModule } from './brands/brand-partnerships.module';
 import { EnvValidationService } from './config/env-validation.service';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 @Module({
   imports: [
@@ -71,6 +73,14 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
     {
       provide: APP_GUARD,
       useClass: UserThrottlerGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: SentryExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
     },
   ],
 })

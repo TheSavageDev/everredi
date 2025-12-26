@@ -1,9 +1,12 @@
 import { NestFactory } from '@nestjs/core';
+import { Logger } from '@nestjs/common';
 import { AppModule } from '../app.module';
 import { TemplateSeedService } from './template-seed.service';
 
+const logger = new Logger('SeedTemplates');
+
 async function bootstrap() {
-  console.log('🚀 Initializing NestJS application...');
+  logger.log('🚀 Initializing NestJS application...');
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['log', 'error', 'warn'],
@@ -15,13 +18,16 @@ async function bootstrap() {
     // Check for --force flag
     const force = process.argv.includes('--force');
     if (force) {
-      console.log('🔄 Force mode enabled - will update existing templates');
+      logger.log('🔄 Force mode enabled - will update existing templates');
     }
     await seedService.seedDefaultTemplates(force);
-    console.log('✅ Seeding completed successfully');
+    logger.log('✅ Seeding completed successfully');
     process.exit(0);
   } catch (error) {
-    console.error('❌ Seeding failed:', error);
+    logger.error(
+      '❌ Seeding failed:',
+      error instanceof Error ? error.stack : String(error),
+    );
     process.exit(1);
   } finally {
     await app.close();

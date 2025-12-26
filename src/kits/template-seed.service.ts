@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
@@ -24,6 +24,8 @@ const SYSTEM_USER_ID = 'system';
 
 @Injectable()
 export class TemplateSeedService {
+  private readonly logger = new Logger(TemplateSeedService.name);
+
   private readonly defaultTemplates: DefaultTemplate[] = [
     {
       name: 'Basic First Aid Kit',
@@ -169,7 +171,7 @@ export class TemplateSeedService {
     let skipped = 0;
     let updated = 0;
 
-    console.log('🌱 Starting to seed default kit templates...');
+    this.logger.log('🌱 Starting to seed default kit templates...');
 
     // Ensure system user document exists
     const systemUserRef = this.firestore
@@ -189,7 +191,7 @@ export class TemplateSeedService {
         createdAt: now,
         updatedAt: now,
       });
-      console.log('✅ Created system user document');
+      this.logger.log('✅ Created system user document');
     }
 
     for (const template of this.defaultTemplates) {
@@ -208,7 +210,7 @@ export class TemplateSeedService {
 
           // If force is true, or template doesn't have items, update it
           if (force || !existingData.publicTemplateId) {
-            console.log(
+            this.logger.log(
               `🔄 ${force ? 'Force updating' : 'Updating'} "${template.name}" - ${!existingData.publicTemplateId ? 'missing items' : 'force reseed'}...`,
             );
 
@@ -232,12 +234,14 @@ export class TemplateSeedService {
                   deleteBatch.delete(doc.ref);
                 });
                 await deleteBatch.commit();
-                console.log(
+                this.logger.log(
                   `  Deleted ${oldItemsSnapshot.size} old items from template`,
                 );
               }
             } catch (error: any) {
-              console.warn(`  Could not delete old items: ${error.message}`);
+              this.logger.warn(
+                `  Could not delete old items: ${error.message}`,
+              );
             }
 
             // Continue to create new template below
@@ -250,7 +254,7 @@ export class TemplateSeedService {
                   existingTemplate.id,
                 );
               if (items.length === 0) {
-                console.log(
+                this.logger.log(
                   `🔄 Updating "${template.name}" - exists but no items found`,
                 );
                 await this.firestore
@@ -260,14 +264,14 @@ export class TemplateSeedService {
                 updated++;
                 // Continue to create new template below
               } else {
-                console.log(
+                this.logger.log(
                   `⏭️  Skipping "${template.name}" - already exists with ${items.length} items`,
                 );
                 skipped++;
                 continue;
               }
             } catch (error: any) {
-              console.log(
+              this.logger.log(
                 `🔄 Updating "${template.name}" - error verifying items: ${error.message}`,
               );
               await this.firestore
@@ -293,7 +297,7 @@ export class TemplateSeedService {
             createdBy: 'system',
           });
 
-        console.log(`  Created public template ${publicTemplate.id}`);
+        this.logger.log(`  Created public template ${publicTemplate.id}`);
 
         // Verify template document exists before adding items
         const templateDocCheck = await this.firestore
@@ -306,7 +310,7 @@ export class TemplateSeedService {
             `Public template document ${publicTemplate.id} was not created!`,
           );
         }
-        console.log(
+        this.logger.log(
           `  ✅ Confirmed template document exists: publicKitTemplates/${publicTemplate.id}`,
         );
 
@@ -320,7 +324,7 @@ export class TemplateSeedService {
           .collection('kitItems')
           .get();
 
-        console.log(
+        this.logger.log(
           `  🔍 Final database check: Found ${finalCheck.size} items in publicKitTemplates/${publicTemplate.id}/kitItems`,
         );
 
@@ -336,26 +340,29 @@ export class TemplateSeedService {
             publicTemplate.id,
           );
         if (savedItems.length !== template.items.length) {
-          console.warn(
+          this.logger.warn(
             `⚠️  Warning: Expected ${template.items.length} items but found ${savedItems.length} for template ${publicTemplate.id}`,
           );
         } else {
-          console.log(
+          this.logger.log(
             `  ✅ Service method confirms ${savedItems.length} items saved to template ${publicTemplate.id}`,
           );
         }
 
-        console.log(
+        this.logger.log(
           `✅ Created "${template.name}" with ${template.items.length} items (public template: ${publicTemplate.id})`,
         );
         created++;
       } catch (error: any) {
-        console.error(`❌ Failed to create "${template.name}":`, error.message);
-        console.error(error.stack);
+        this.logger.error(
+          `❌ Failed to create "${template.name}":`,
+          error.stack,
+          TemplateSeedService.name,
+        );
       }
     }
 
-    console.log(
+    this.logger.log(
       `\n✨ Seeding complete! Created: ${created}, Updated: ${updated}, Skipped: ${skipped}`,
     );
 
@@ -377,7 +384,7 @@ export class TemplateSeedService {
         `Public template document ${publicTemplateId} does not exist`,
       );
     }
-    console.log(
+    this.logger.log(
       `  Template document ${publicTemplateId} exists, adding ${items.length} items...`,
     );
 
@@ -413,73 +420,69 @@ export class TemplateSeedService {
         itemData.notes = item.notes;
       }
 
-      console.log(
+      this.logger.log(
         `    Adding item ${index + 1}/${items.length}: ${item.supplyName} (qty: ${item.quantity}, supplyId: ${supplyId})`,
       );
       batch.set(itemRef, itemData);
     });
 
     try {
-      console.log(`  Committing batch with ${items.length} items...`);
+      this.logger.log(`  Committing batch with ${items.length} items...`);
       await batch.commit();
-      console.log(`  ✅ Batch committed successfully`);
+      this.logger.log(`  ✅ Batch committed successfully`);
 
       // Wait a moment for Firestore to propagate
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       // Verify items were actually written by querying directly
-      console.log(`  Verifying items in database...`);
+      this.logger.log(`  Verifying items in database...`);
       const itemsSnapshot = await templateRef
         .collection('kitItems')
         .orderBy('sortOrder')
         .get();
 
-      console.log(
+      this.logger.log(
         `  Found ${itemsSnapshot.size} items in database (expected ${items.length})`,
       );
 
       if (itemsSnapshot.empty) {
-        console.error(
-          `  ❌ ERROR: No items found in template ${publicTemplateId} after batch commit!`,
-        );
-        console.error(
-          `  Template path: publicKitTemplates/${publicTemplateId}/kitItems`,
+        this.logger.error(
+          `  ❌ ERROR: No items found in template ${publicTemplateId} after batch commit! Template path: publicKitTemplates/${publicTemplateId}/kitItems`,
         );
         throw new Error(
           `Failed to save items to template ${publicTemplateId} - batch committed but no items found`,
         );
       } else if (itemsSnapshot.size !== items.length) {
-        console.warn(
+        this.logger.warn(
           `  ⚠️  WARNING: Expected ${items.length} items but found ${itemsSnapshot.size} in template ${publicTemplateId}`,
         );
         // Log what we found
         itemsSnapshot.docs.forEach((doc, idx) => {
           const data = doc.data();
-          console.log(
+          this.logger.log(
             `    Item ${idx + 1}: ${data.supplyName} (qty: ${data.quantity}, supplyId: ${data.supplyId})`,
           );
         });
       } else {
-        console.log(
+        this.logger.log(
           `  ✅ Verified ${itemsSnapshot.size} items exist in template ${publicTemplateId}`,
         );
         // Log first few items as confirmation
         itemsSnapshot.docs.slice(0, 3).forEach((doc, idx) => {
           const data = doc.data();
-          console.log(
+          this.logger.log(
             `    Item ${idx + 1}: ${data.supplyName} (qty: ${data.quantity})`,
           );
         });
         if (itemsSnapshot.size > 3) {
-          console.log(`    ... and ${itemsSnapshot.size - 3} more items`);
+          this.logger.log(`    ... and ${itemsSnapshot.size - 3} more items`);
         }
       }
     } catch (error: any) {
-      console.error(
-        `  ❌ Failed to commit batch for template ${publicTemplateId}:`,
-        error.message,
+      this.logger.error(
+        `  ❌ Failed to commit batch for template ${publicTemplateId}: ${error.message}`,
+        error.stack,
       );
-      console.error(`  Error stack:`, error.stack);
       throw error;
     }
   }

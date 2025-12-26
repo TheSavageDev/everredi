@@ -8,6 +8,7 @@ import {
   Body,
   Query,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -19,6 +20,8 @@ import { PublicTemplatesService } from './public-templates.service';
 @Controller('kits')
 @UseGuards(FirebaseAuthGuard)
 export class KitsController {
+  private readonly logger = new Logger(KitsController.name);
+
   constructor(
     private readonly templatesService: KitTemplatesService,
     private readonly userKitsService: UserKitsService,
@@ -94,6 +97,8 @@ export class KitsController {
 @Controller('user-kits')
 @UseGuards(FirebaseAuthGuard)
 export class UserKitsController {
+  private readonly logger = new Logger(UserKitsController.name);
+
   constructor(
     private readonly userKitsService: UserKitsService,
     private readonly templatesService: KitTemplatesService,
@@ -154,13 +159,12 @@ export class UserKitsController {
             body.templateId,
             body.selectedPeopleCount,
           );
-        console.log(
+        this.logger.log(
           `Found ${templateItems.length} items in public template ${body.templateId}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
       } catch (error: any) {
-        console.warn(
-          'Failed to get items from public template:',
-          error.message,
+        this.logger.warn(
+          `Failed to get items from public template: ${error.message}`,
         );
         templateItems = [];
       }
@@ -172,13 +176,13 @@ export class UserKitsController {
           body.templateId,
           body.selectedPeopleCount,
         );
-        console.log(
+        this.logger.log(
           `Found ${templateItems.length} items in user template ${body.templateId} for user ${user.uid}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
       } catch (error: any) {
-        console.error(
-          `Failed to get template items for template ${body.templateId}:`,
-          error.message,
+        this.logger.error(
+          `Failed to get template items for template ${body.templateId}: ${error.message}`,
+          error.stack,
         );
         templateItems = [];
       }
@@ -186,7 +190,7 @@ export class UserKitsController {
 
     // Warn if template has no items
     if (!templateItems || templateItems.length === 0) {
-      console.warn(
+      this.logger.warn(
         `Template ${body.templateId} has no items. Creating kit without items.`,
       );
     }

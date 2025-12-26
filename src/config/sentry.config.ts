@@ -14,6 +14,7 @@ export function initializeSentry(configService: ConfigService): void {
 
   // Only initialize if DSN is provided
   if (!dsn) {
+    // Use console.warn here since logger might not be available yet during initialization
     console.warn(
       '⚠️  Sentry DSN not configured. Error tracking will be disabled.',
     );
@@ -26,6 +27,9 @@ export function initializeSentry(configService: ConfigService): void {
       environment,
       release,
       tracesSampleRate,
+      enableLogs: true,
+      // HTTP instrumentation is enabled by default in Sentry v8 when tracesSampleRate is set
+      // Note: consoleLoggingIntegration can be added if needed, but we're using NestJS Logger with Sentry.logger instead
       // HTTP instrumentation is enabled by default in Sentry v8 when tracesSampleRate is set
       // Filter out sensitive data
       beforeSend(event) {
@@ -76,10 +80,12 @@ export function initializeSentry(configService: ConfigService): void {
       },
     });
 
+    // Use console.log here since logger might not be available yet during initialization
     console.log(
       `✅ Sentry initialized for environment: ${environment}${release ? ` (release: ${release})` : ''}`,
     );
   } catch (error) {
+    // Use console.error here since logger might not be available yet during initialization
     console.error('❌ Failed to initialize Sentry:', error);
     console.warn('   Continuing without Sentry...');
   }

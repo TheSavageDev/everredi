@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 export interface RevenueCatCustomerInfo {
   request_date: string;
@@ -58,11 +58,12 @@ export interface RevenueCatCancelResponse {
 export class RevenueCatService {
   private readonly apiKey: string;
   private readonly baseUrl = 'https://api.revenuecat.com/v1';
+  private readonly logger = new Logger(RevenueCatService.name);
 
   constructor() {
     this.apiKey = process.env.REVENUECAT_SECRET_API_KEY || '';
     if (!this.apiKey) {
-      console.warn('[RevenueCat] REVENUECAT_SECRET_API_KEY is not set');
+      this.logger.warn('[RevenueCat] REVENUECAT_SECRET_API_KEY is not set');
     }
   }
 

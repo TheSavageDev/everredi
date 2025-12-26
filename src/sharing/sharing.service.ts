@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -33,6 +34,8 @@ export interface SharedKitLink {
 
 @Injectable()
 export class SharingService {
+  private readonly logger = new Logger(SharingService.name);
+
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     private readonly userKitsService: UserKitsService,
@@ -371,7 +374,9 @@ export class SharingService {
         }
       } catch (error) {
         // If we can't get user info, continue without it
-        console.warn(`Failed to get user info for ${share.sharedWith}:`, error);
+        this.logger.warn(
+          `Failed to get user info for ${share.sharedWith}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
 
       shares.push({

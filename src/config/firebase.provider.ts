@@ -1,4 +1,4 @@
-import { FactoryProvider } from '@nestjs/common';
+import { FactoryProvider, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   initializeFirebase,
@@ -6,6 +6,8 @@ import {
   getFirestore,
   getAuth,
 } from './firebase.config';
+
+const logger = new Logger('FirebaseProvider');
 
 export const FIREBASE_ADMIN = 'FIREBASE_ADMIN';
 export const FIRESTORE = 'FIRESTORE';
@@ -18,7 +20,10 @@ export const firebaseAdminProvider: FactoryProvider = {
       initializeFirebase(configService);
       return getFirebaseAdmin();
     } catch (error) {
-      console.error('Failed to initialize Firebase Admin:', error);
+      logger.error(
+        'Failed to initialize Firebase Admin:',
+        error instanceof Error ? error.stack : String(error),
+      );
       throw error; // Re-throw to prevent app from starting with broken Firebase
     }
   },
@@ -33,7 +38,10 @@ export const firestoreProvider: FactoryProvider = {
       initializeFirebase(configService);
       return getFirestore();
     } catch (error) {
-      console.error('Failed to initialize Firestore:', error);
+      logger.error(
+        'Failed to initialize Firestore:',
+        error instanceof Error ? error.stack : String(error),
+      );
       throw error; // Re-throw to prevent app from starting with broken Firestore
     }
   },
@@ -48,7 +56,10 @@ export const firebaseAuthProvider: FactoryProvider = {
       initializeFirebase(configService);
       return getAuth();
     } catch (error) {
-      console.error('Failed to initialize Firebase Auth:', error);
+      logger.error(
+        'Failed to initialize Firebase Auth:',
+        error instanceof Error ? error.stack : String(error),
+      );
       throw error; // Re-throw to prevent app from starting with broken Auth
     }
   },

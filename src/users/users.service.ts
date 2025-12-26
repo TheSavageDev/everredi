@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import type { auth } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -31,6 +31,8 @@ export interface User {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     @Inject(FIREBASE_AUTH) private readonly firebaseAuth: auth.Auth,
@@ -95,7 +97,7 @@ export class UsersService {
           }
         } catch (locationError) {
           // Log but don't fail user creation if location creation fails
-          console.warn(
+          this.logger.warn(
             `Failed to create default location for user ${firebaseUid}:`,
             locationError,
           );
@@ -232,9 +234,6 @@ export class UsersService {
    * @example
    * ```typescript
    * const result = await usersService.applyReferralCode('user123', 'REFCODE123');
-   * if (result.success) {
-   *   console.log('Referral code applied! Both users received rewards.');
-   * }
    * ```
    */
   async applyReferralCode(
@@ -338,8 +337,6 @@ export class UsersService {
    * @example
    * ```typescript
    * const stats = await usersService.getReferralStats('user123');
-   * console.log(`You've referred ${stats.referralsCount} users`);
-   * console.log(`Your code: ${stats.referralCode}`);
    * ```
    */
   async getReferralStats(userId: string): Promise<{

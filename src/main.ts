@@ -1,16 +1,18 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { EnvValidationService } from './config/env-validation.service';
 import { ConfigService } from '@nestjs/config';
 import { initializeSentry } from './config/sentry.config';
 import * as Sentry from '@sentry/node';
 
+const logger = new Logger('Bootstrap');
+
 async function bootstrap() {
   try {
-    console.log('🚀 Starting EverRedi API...');
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`PORT: ${process.env.PORT || '8080'}`);
+    logger.log('🚀 Starting EverRedi API...');
+    logger.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.log(`PORT: ${process.env.PORT || '8080'}`);
 
     const app = await NestFactory.create(AppModule, {
       logger: ['error', 'warn', 'log', 'debug', 'verbose'],
@@ -26,29 +28,29 @@ async function bootstrap() {
       const validation = envValidation.validate();
 
       if (!validation.isValid) {
-        console.error('❌ Missing required environment variables:');
+        logger.error('❌ Missing required environment variables:');
         validation.missing.forEach((key) => {
-          console.error(`   - ${key}`);
+          logger.error(`   - ${key}`);
         });
-        console.error('\n⚠️  Application may not function correctly.');
-        console.error(
+        logger.error('\n⚠️  Application may not function correctly.');
+        logger.error(
           '   Please check your .env file and ensure all required variables are set.\n',
         );
       }
 
       if (validation.warnings.length > 0) {
-        console.warn('⚠️  Environment warnings:');
+        logger.warn('⚠️  Environment warnings:');
         validation.warnings.forEach((warning) => {
-          console.warn(`   ${warning}`);
+          logger.warn(`   ${warning}`);
         });
-        console.warn('');
+        logger.warn('');
       }
 
       if (validation.isValid) {
-        console.log('✅ Environment configuration validated');
+        logger.log('✅ Environment configuration validated');
       }
     } catch (error) {
-      console.warn('⚠️  Environment validation failed:', error);
+      logger.warn('⚠️  Environment validation failed:', error);
       // Continue anyway - some services might still work
     }
 
@@ -74,17 +76,17 @@ async function bootstrap() {
     // Cloud Run sets PORT automatically, default to 8080
     const port = process.env.PORT || 8080;
 
-    console.log(`📡 Starting server on port ${port}...`);
+    logger.log(`📡 Starting server on port ${port}...`);
     await app.listen(port);
 
-    console.log(`✅ Application is running on port ${port}/api`);
-    console.log(`🌐 CORS enabled for origin: ${corsOrigin}`);
-    console.log(
+    logger.log(`✅ Application is running on port ${port}/api`);
+    logger.log(`🌐 CORS enabled for origin: ${corsOrigin}`);
+    logger.log(
       `🏥 Health check available at: http://0.0.0.0:${port}/api/health`,
     );
   } catch (error) {
-    console.error('❌ Failed to start application:', error);
-    console.error(
+    logger.error('❌ Failed to start application:', error);
+    logger.error(
       'Stack trace:',
       error instanceof Error ? error.stack : 'No stack trace',
     );
@@ -102,7 +104,7 @@ async function bootstrap() {
 }
 
 bootstrap().catch((error) => {
-  console.error('❌ Unhandled error during bootstrap:', error);
+  logger.error('❌ Unhandled error during bootstrap:', error);
 
   // Capture unhandled bootstrap errors
   Sentry.captureException(error, {

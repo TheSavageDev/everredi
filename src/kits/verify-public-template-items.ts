@@ -1,10 +1,13 @@
 import { NestFactory } from '@nestjs/core';
+import { Logger } from '@nestjs/common';
 import { AppModule } from '../app.module';
 import { FIRESTORE } from '../config/firebase.provider';
 import type { firestore } from 'firebase-admin';
 
+const logger = new Logger('VerifyPublicTemplateItems');
+
 async function bootstrap() {
-  console.log('🚀 Initializing NestJS application...');
+  logger.log('🚀 Initializing NestJS application...');
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['log', 'error', 'warn'],
@@ -19,7 +22,7 @@ async function bootstrap() {
       .where('isActive', '==', true)
       .get();
 
-    console.log(
+    logger.log(
       `\n📋 Found ${templatesSnapshot.size} active public templates\n`,
     );
 
@@ -27,8 +30,8 @@ async function bootstrap() {
       const templateData = templateDoc.data();
       const templateId = templateDoc.id;
 
-      console.log(`\n📦 Template: ${templateData.name} (ID: ${templateId})`);
-      console.log(`   Path: publicKitTemplates/${templateId}`);
+      logger.log(`\n📦 Template: ${templateData.name} (ID: ${templateId})`);
+      logger.log(`   Path: publicKitTemplates/${templateId}`);
 
       // Check items subcollection
       const itemsSnapshot = await firestore
@@ -37,26 +40,29 @@ async function bootstrap() {
         .collection('kitItems')
         .get();
 
-      console.log(`   📊 Items subcollection: ${itemsSnapshot.size} items`);
+      logger.log(`   📊 Items subcollection: ${itemsSnapshot.size} items`);
 
       if (itemsSnapshot.empty) {
-        console.log(`   ❌ NO ITEMS FOUND in kitItems subcollection!`);
-        console.log(`   Full path: publicKitTemplates/${templateId}/kitItems`);
+        logger.log(`   ❌ NO ITEMS FOUND in kitItems subcollection!`);
+        logger.log(`   Full path: publicKitTemplates/${templateId}/kitItems`);
       } else {
-        console.log(`   ✅ Items found:`);
+        logger.log(`   ✅ Items found:`);
         itemsSnapshot.docs.forEach((itemDoc, idx) => {
           const itemData = itemDoc.data();
-          console.log(
+          logger.log(
             `      ${idx + 1}. ${itemData.supplyName} (qty: ${itemData.quantity}, supplyId: ${itemData.supplyId})`,
           );
         });
       }
     }
 
-    console.log('\n✅ Verification complete');
+    logger.log('\n✅ Verification complete');
     process.exit(0);
   } catch (error) {
-    console.error('❌ Verification failed:', error);
+    logger.error(
+      '❌ Verification failed:',
+      error instanceof Error ? error.stack : String(error),
+    );
     process.exit(1);
   } finally {
     await app.close();

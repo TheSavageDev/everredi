@@ -6,6 +6,7 @@ import {
   Headers,
   Req,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -18,6 +19,8 @@ import { RevenueCatService } from './revenuecat.service';
 
 @Controller('subscriptions')
 export class SubscriptionsController {
+  private readonly logger = new Logger(SubscriptionsController.name);
+
   constructor(
     private readonly subscriptionsService: SubscriptionsService,
     private readonly stripeService: StripeService,
@@ -71,7 +74,10 @@ export class SubscriptionsController {
       await this.subscriptionsService.handleWebhookEvent(event);
       return { received: true };
     } catch (error) {
-      console.error('Webhook error:', error);
+      this.logger.error(
+        'Webhook error:',
+        error instanceof Error ? error.stack : String(error),
+      );
       return { received: false, error: error.message };
     }
   }

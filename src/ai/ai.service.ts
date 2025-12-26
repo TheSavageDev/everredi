@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, Inject } from '@nestjs/common';
+import { Injectable, ForbiddenException, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { firestore } from 'firebase-admin';
@@ -35,6 +35,7 @@ export interface AiRecommendation {
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
   private genAI: GoogleGenerativeAI | null = null;
   private readonly apiKey: string;
 
@@ -46,14 +47,14 @@ export class AiService {
     this.apiKey = this.configService.get<string>('GEMINI_API_KEY') || '';
 
     if (!this.apiKey) {
-      console.warn(
+      this.logger.warn(
         '⚠️  Gemini AI API key not configured. AI recommendations will not work.\n' +
           '   Please set GEMINI_API_KEY in your .env file.\n' +
           '   Get your API key from: https://makersuite.google.com/app/apikey',
       );
     } else {
       this.genAI = new GoogleGenerativeAI(this.apiKey);
-      console.log('✅ Gemini AI initialized successfully');
+      this.logger.log('✅ Gemini AI initialized successfully');
     }
   }
 
@@ -170,7 +171,10 @@ Return ONLY the JSON array, no other text.`;
       const doc = await docRef.get();
       return { id: doc.id, ...doc.data() } as AiRecommendation;
     } catch (error: any) {
-      console.error('AI recommendation error:', error);
+      this.logger.error(
+        'AI recommendation error:',
+        error instanceof Error ? error.stack : String(error),
+      );
 
       // Provide more specific error messages
       if (
@@ -246,7 +250,10 @@ Return ONLY the JSON array, no other text.`;
       }
       return [];
     } catch (error) {
-      console.error('Failed to list available models:', error);
+      this.logger.error(
+        'Failed to list available models:',
+        error instanceof Error ? error.stack : String(error),
+      );
       return [];
     }
   }

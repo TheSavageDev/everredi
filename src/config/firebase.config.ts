@@ -1,8 +1,10 @@
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 
 let isInitialized = false;
 let firebaseAdminInstance: admin.app.App | null = null;
+const logger = new Logger('FirebaseConfig');
 
 export function initializeFirebase(configService: ConfigService): void {
   if (admin.apps.length > 0) {
@@ -31,7 +33,7 @@ export function initializeFirebase(configService: ConfigService): void {
     if (isGCP && projectId) {
       // On GCP, use Application Default Credentials (ADC)
       // The service account attached to Cloud Run will be used automatically
-      console.log(
+      logger.log(
         '🔐 Using Application Default Credentials (GCP environment detected)',
       );
       credential = admin.credential.applicationDefault();
@@ -46,7 +48,7 @@ export function initializeFirebase(configService: ConfigService): void {
         serviceAccount as admin.ServiceAccount,
       );
     } else {
-      console.warn(
+      logger.warn(
         '⚠️  Firebase Admin SDK not initialized: Missing environment variables.\n' +
           '   Please set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in your .env file.\n' +
           '   The app will start but Firebase features will not work until configured.',
@@ -63,12 +65,15 @@ export function initializeFirebase(configService: ConfigService): void {
     });
     isInitialized = true;
 
-    console.log(
+    logger.log(
       `✅ Firebase Admin SDK initialized successfully for project: ${projectId} (database: ${databaseId})`,
     );
   } catch (error) {
-    console.error('❌ Failed to initialize Firebase Admin SDK:', error);
-    console.warn('   Continuing without Firebase Admin SDK...');
+    logger.error(
+      '❌ Failed to initialize Firebase Admin SDK:',
+      error instanceof Error ? error.stack : String(error),
+    );
+    logger.warn('   Continuing without Firebase Admin SDK...');
   }
 }
 

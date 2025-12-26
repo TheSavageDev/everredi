@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -47,6 +48,7 @@ export class UserKitsService {
     @Inject(forwardRef(() => InventoryService))
     private readonly inventoryService: InventoryService,
     private readonly usersService: UsersService,
+    private readonly logger: Logger,
   ) {}
 
   async getUserKits(userId: string): Promise<UserKit[]> {
@@ -189,7 +191,7 @@ export class UserKitsService {
     // For "fully loaded" kits, actualQuantity = requiredQuantity
     // For "empty" kits, actualQuantity = 0
     if (templateItems && templateItems.length > 0) {
-      console.log(
+      this.logger.log(
         `Creating kit with ${templateItems.length} items from template ${templateId} (${includeItems ? 'fully loaded' : 'empty'})`,
       );
       const now = Timestamp.now();
@@ -197,7 +199,9 @@ export class UserKitsService {
 
       for (const item of templateItems) {
         if (!item.supplyId) {
-          console.warn('Skipping item without supplyId:', item);
+          this.logger.warn(
+            `Skipping item without supplyId: ${JSON.stringify(item)}`,
+          );
           continue;
         }
 
@@ -262,13 +266,13 @@ export class UserKitsService {
               userId,
               inventoryItemData,
             );
-            console.log(
+            this.logger.log(
               `Created inventory item for ${item.supplyName} (quantity: ${actualQuantity}, kit: ${kit.name})`,
             );
           } catch (error) {
-            console.error(
-              `Failed to create inventory item for ${item.supplyName}:`,
-              error,
+            this.logger.error(
+              `Failed to create inventory item for ${item.supplyName}: ${error instanceof Error ? error.message : String(error)}`,
+              error instanceof Error ? error.stack : undefined,
             );
             // Don't fail the entire operation if inventory creation fails
           }
@@ -276,11 +280,11 @@ export class UserKitsService {
       }
 
       await batch.commit();
-      console.log(
+      this.logger.log(
         `Successfully created ${templateItems.length} item instances for kit ${kit.id} (actualQuantity: ${includeItems ? 'set to requiredQuantity' : '0'})`,
       );
     } else {
-      console.log(
+      this.logger.log(
         `Template ${templateId} has no items. Creating kit without items.`,
       );
     }
@@ -357,9 +361,9 @@ export class UserKitsService {
                   updateData.locationName = locationData?.name || null;
                 }
               } catch (error) {
-                console.error(
-                  `Failed to fetch location name for ${updates.locationId}:`,
-                  error,
+                this.logger.error(
+                  `Failed to fetch location name for ${updates.locationId}: ${error instanceof Error ? error.message : String(error)}`,
+                  error instanceof Error ? error.stack : undefined,
                 );
                 // Continue without locationName
               }
@@ -381,15 +385,15 @@ export class UserKitsService {
           });
 
           await batch.commit();
-          console.log(
+          this.logger.log(
             `Updated ${inventorySnapshot.docs.length} inventory items for kit ${kitId}`,
           );
         }
       } catch (error) {
         // Log error but don't fail the kit update
-        console.error(
-          `Failed to update inventory items for kit ${kitId}:`,
-          error,
+        this.logger.error(
+          `Failed to update inventory items for kit ${kitId}: ${error instanceof Error ? error.message : String(error)}`,
+          error instanceof Error ? error.stack : undefined,
         );
       }
     }

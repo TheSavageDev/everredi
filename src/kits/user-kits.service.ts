@@ -43,12 +43,13 @@ export interface KitItemInstance {
 
 @Injectable()
 export class UserKitsService {
+  private readonly logger = new Logger(UserKitsService.name);
+
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     @Inject(forwardRef(() => InventoryService))
     private readonly inventoryService: InventoryService,
     private readonly usersService: UsersService,
-    private readonly logger: Logger,
   ) {}
 
   async getUserKits(userId: string): Promise<UserKit[]> {

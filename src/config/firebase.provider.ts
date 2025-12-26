@@ -36,7 +36,8 @@ export const firestoreProvider: FactoryProvider = {
     try {
       // Ensure Firebase is initialized before getting Firestore
       initializeFirebase(configService);
-      return getFirestore();
+      // Pass ConfigService to getFirestore() to ensure proper environment variable access
+      return getFirestore(configService);
     } catch (error) {
       logger.error(
         'Failed to initialize Firestore:',

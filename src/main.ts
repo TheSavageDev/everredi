@@ -55,11 +55,64 @@ async function bootstrap() {
     }
 
     // Enable CORS
-    const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
-    app.enableCors({
-      origin: corsOrigin,
-      credentials: true,
-    });
+    // Use ConfigService to properly read environment variables (especially in Cloud Run)
+    const corsOrigin =
+      configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000';
+
+    // Support multiple origins (comma-separated) or single origin
+    const allowedOrigins = corsOrigin.split(',').map((origin) => origin.trim());
+
+    // In staging/production, also allow the Cloud Run service URL
+    // This allows both the vanity URL and the default Cloud Run URL to work
+    const isProduction = configService.get<string>('NODE_ENV') === 'production';
+    if (isProduction) {
+      // Get the Cloud Run service name from environment
+      // K_SERVICE is set by Cloud Run (e.g., "everredi-api-staging")
+      const serviceName = process.env.K_SERVICE;
+
+      // Cloud Run URLs have format: https://<service-name>-<hash>-<region>.a.run.app
+      // We'll match any URL that contains the service name and ends with .a.run.app
+      app.enableCors({
+        origin: (
+          origin: string | undefined,
+          callback: (err: Error | null, allow?: boolean) => void,
+        ) => {
+          // Allow requests with no origin (e.g., mobile apps, Postman)
+          if (!origin) {
+            callback(null, true);
+            return;
+          }
+
+          // Allow if origin is in the explicitly allowed list
+          if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+          }
+
+          // Allow if origin matches Cloud Run URL pattern for this service
+          // Pattern: https://<service-name>-<hash>-<region>.a.run.app
+          if (
+            serviceName &&
+            origin.includes(serviceName) &&
+            origin.endsWith('.a.run.app')
+          ) {
+            callback(null, true);
+            return;
+          }
+
+          // Reject all other origins
+          callback(new Error('Not allowed by CORS'));
+        },
+        credentials: true,
+      });
+    } else {
+      // Development: use simple origin matching
+      app.enableCors({
+        origin:
+          allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+        credentials: true,
+      });
+    }
 
     // Global validation pipe
     app.useGlobalPipes(
@@ -80,7 +133,10 @@ async function bootstrap() {
     await app.listen(port);
 
     logger.log(`✅ Application is running on port ${port}/api`);
-    logger.log(`🌐 CORS enabled for origin: ${corsOrigin}`);
+    logger.log(`🌐 CORS enabled for origins: ${allowedOrigins.join(', ')}`);
+    if (isProduction) {
+      logger.log(`   Also allowing Cloud Run service URL pattern`);
+    }
     logger.log(
       `🏥 Health check available at: http://0.0.0.0:${port}/api/health`,
     );

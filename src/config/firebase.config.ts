@@ -86,14 +86,19 @@ export function getFirebaseAdmin(): admin.app.App {
   return firebaseAdminInstance;
 }
 
-export function getFirestore(): admin.firestore.Firestore {
+export function getFirestore(
+  configService?: ConfigService,
+): admin.firestore.Firestore {
   if (!isInitialized || !firebaseAdminInstance) {
     throw new Error(
       'Firebase Admin SDK not initialized. Check your environment variables.',
     );
   }
-  // Get database ID from environment or use default
-  const databaseId = process.env.FIREBASE_DATABASE_ID || '(default)';
+  // Get database ID from ConfigService if available, otherwise fallback to process.env
+  // ConfigService properly handles Cloud Run environment variables
+  const databaseId = configService
+    ? configService.get<string>('FIREBASE_DATABASE_ID') || '(default)'
+    : process.env.FIREBASE_DATABASE_ID || '(default)';
 
   // Firebase Admin SDK v13+ supports multiple Firestore databases
   // For named databases, call app.firestore(databaseId) directly
@@ -101,9 +106,9 @@ export function getFirestore(): admin.firestore.Firestore {
   if (databaseId === '(default)') {
     return firebaseAdminInstance.firestore();
   }
-  // For named Firestore databases, pass the databaseId to app.firestore()
-  // TypeScript types may not reflect this, so we use type assertion
-  return (firebaseAdminInstance.firestore as any)(databaseId);
+  // For named Firestore databases, use the underlying function signature
+  // @ts-expect-error: Type declaration missing for named database, but supported by the SDK
+  return firebaseAdminInstance.firestore(databaseId);
 }
 
 export function getAuth(): admin.auth.Auth {

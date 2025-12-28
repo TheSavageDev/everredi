@@ -3,51 +3,16 @@ import {
   BrandPartnership,
 } from '../brand-partnerships.service';
 import { Timestamp } from 'firebase-admin/firestore';
+import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
 
 describe('BrandPartnershipsService', () => {
-  let firestoreMock: any;
-  let mockCollectionRef: any;
-  let mockDocRef: any;
+  const firebaseServiceMock = createFirebaseServiceMock();
   let service: BrandPartnershipsService;
 
   beforeEach(() => {
-    // Create a mock document reference
-    mockDocRef = {
-      id: 'doc-id',
-      get: jest.fn(),
-      set: jest.fn().mockResolvedValue(undefined),
-      update: jest.fn().mockResolvedValue(undefined),
-      delete: jest.fn().mockResolvedValue(undefined),
-    };
-
-    // Create a mock collection reference
-    mockCollectionRef = {
-      doc: jest.fn((id?: string) => {
-        if (id) {
-          mockDocRef.id = id;
-        }
-        return mockDocRef;
-      }),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      get: jest.fn().mockResolvedValue({
-        docs: [],
-        empty: true,
-        size: 0,
-      }),
-    };
-
-    firestoreMock = {
-      collection: jest.fn((name: string) => {
-        if (name === 'brandPartnerships') {
-          return mockCollectionRef;
-        }
-        return mockCollectionRef;
-      }),
-    };
-
     jest.clearAllMocks();
-    service = new BrandPartnershipsService(firestoreMock);
+    (firebaseServiceMock._clearAll as jest.Mock)();
+    service = new BrandPartnershipsService(firebaseServiceMock as any);
   });
 
   describe('getActivePartnerships', () => {
@@ -64,26 +29,20 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      // Mock the query chain: collection().where().where().get()
-      const queryMock = {
-        where: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({
-          docs: [
-            {
-              id: '1',
-              data: () => partnership1,
-            },
-          ],
-        }),
-      };
-
-      // Override the collection to return a queryable mock
-      firestoreMock.collection = jest.fn(() => queryMock);
+      (firebaseServiceMock._setMockData as jest.Mock)('brandPartnerships', [
+        partnership1,
+      ]);
 
       const result = await service.getActivePartnerships();
 
-      expect(firestoreMock.collection).toHaveBeenCalledWith(
+      expect(firebaseServiceMock.getCollection).toHaveBeenCalledWith(
         'brandPartnerships',
+        expect.objectContaining({
+          where: expect.arrayContaining([
+            { field: 'isActive', operator: '==', value: true },
+            { field: 'startDate', operator: '<=', value: expect.anything() },
+          ]),
+        }),
       );
       expect(result).toHaveLength(1);
       expect(result[0].brandName).toBe('Test Brand');
@@ -103,22 +62,13 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const queryMock = {
-        where: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({
-          docs: [
-            {
-              id: '1',
-              data: () => expiredPartnership,
-            },
-          ],
-        }),
-      };
-
-      firestoreMock.collection = jest.fn(() => queryMock);
+      (firebaseServiceMock._setMockData as jest.Mock)('brandPartnerships', [
+        expiredPartnership,
+      ]);
 
       const result = await service.getActivePartnerships();
 
+      // Service filters out expired partnerships in memory
       expect(result).toHaveLength(0);
     });
 
@@ -148,17 +98,10 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const queryMock = {
-        where: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({
-          docs: [
-            { id: '1', data: () => partnership1 },
-            { id: '2', data: () => partnership2 },
-          ],
-        }),
-      };
-
-      firestoreMock.collection = jest.fn(() => queryMock);
+      (firebaseServiceMock._setMockData as jest.Mock)('brandPartnerships', [
+        partnership1,
+        partnership2,
+      ]);
 
       const result = await service.getActivePartnerships(['cat1']);
 
@@ -190,17 +133,10 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const queryMock = {
-        where: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({
-          docs: [
-            { id: '1', data: () => partnership1 },
-            { id: '2', data: () => partnership2 },
-          ],
-        }),
-      };
-
-      firestoreMock.collection = jest.fn(() => queryMock);
+      (firebaseServiceMock._setMockData as jest.Mock)('brandPartnerships', [
+        partnership1,
+        partnership2,
+      ]);
 
       const result = await service.getActivePartnerships();
 
@@ -224,24 +160,17 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const collectionMock = {
-        orderBy: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({
-          docs: [
-            {
-              id: '1',
-              data: () => partnership1,
-            },
-          ],
-        }),
-      };
-
-      firestoreMock.collection = jest.fn(() => collectionMock);
+      (firebaseServiceMock._setMockData as jest.Mock)('brandPartnerships', [
+        partnership1,
+      ]);
 
       const result = await service.getAllPartnerships();
 
-      expect(firestoreMock.collection).toHaveBeenCalledWith(
+      expect(firebaseServiceMock.getCollection).toHaveBeenCalledWith(
         'brandPartnerships',
+        expect.objectContaining({
+          orderBy: { field: 'priority', direction: 'desc' },
+        }),
       );
       expect(result).toHaveLength(1);
     });
@@ -261,30 +190,28 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const docRef = mockCollectionRef.doc('1');
-      (docRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: true,
-        data: () => partnership,
-      });
+      (firebaseServiceMock._setMockDocument as jest.Mock)(
+        'brandPartnerships/1',
+        partnership,
+      );
 
       const result = await service.getPartnership('1');
 
-      expect(firestoreMock.collection).toHaveBeenCalledWith(
+      expect(firebaseServiceMock.getDocument).toHaveBeenCalledWith(
         'brandPartnerships',
+        '1',
       );
-      expect(mockCollectionRef.doc).toHaveBeenCalledWith('1');
       expect(result).toBeDefined();
       expect(result?.brandName).toBe('Test Brand');
     });
 
     it('should return null if partnership not found', async () => {
-      const docRef = mockCollectionRef.doc('nonexistent');
-      (docRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: false,
-      });
-
       const result = await service.getPartnership('nonexistent');
 
+      expect(firebaseServiceMock.getDocument).toHaveBeenCalledWith(
+        'brandPartnerships',
+        'nonexistent',
+      );
       expect(result).toBeNull();
     });
   });
@@ -300,25 +227,16 @@ describe('BrandPartnershipsService', () => {
         startDate: now,
       };
 
-      const newDocRef = mockCollectionRef.doc();
-      newDocRef.id = 'new-id';
-      (newDocRef.set as jest.Mock) = jest.fn().mockResolvedValue(undefined);
-      (newDocRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: true,
-        data: () => ({
-          ...partnershipData,
-          createdAt: now,
-          updatedAt: now,
-        }),
-      });
-
       const result = await service.createPartnership(partnershipData);
 
-      expect(firestoreMock.collection).toHaveBeenCalledWith(
+      expect(firebaseServiceMock.addDocument).toHaveBeenCalledWith(
         'brandPartnerships',
+        expect.objectContaining({
+          ...partnershipData,
+          createdAt: expect.anything(),
+          updatedAt: expect.anything(),
+        }),
       );
-      expect(mockCollectionRef.doc).toHaveBeenCalled();
-      expect(newDocRef.set).toHaveBeenCalled();
       expect(result).toBeDefined();
       expect(result.brandName).toBe('New Brand');
     });
@@ -338,18 +256,10 @@ describe('BrandPartnershipsService', () => {
         updatedAt: now,
       };
 
-      const docRef = mockCollectionRef.doc('1');
-      (docRef.get as jest.Mock) = jest
-        .fn()
-        .mockResolvedValueOnce({
-          exists: true,
-          data: () => existingPartnership,
-        })
-        .mockResolvedValueOnce({
-          exists: true,
-          data: () => ({ ...existingPartnership, brandName: 'Updated Brand' }),
-        });
-      (docRef.update as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+      (firebaseServiceMock._setMockDocument as jest.Mock)(
+        'brandPartnerships/1',
+        existingPartnership,
+      );
 
       const updates = {
         brandName: 'Updated Brand',
@@ -358,17 +268,17 @@ describe('BrandPartnershipsService', () => {
 
       await service.updatePartnership('1', updates);
 
-      expect(mockCollectionRef.doc).toHaveBeenCalledWith('1');
-      expect(docRef.get).toHaveBeenCalled();
-      expect(docRef.update).toHaveBeenCalled();
+      expect(firebaseServiceMock.updateDocument).toHaveBeenCalledWith(
+        'brandPartnerships',
+        '1',
+        expect.objectContaining({
+          ...updates,
+          updatedAt: expect.anything(),
+        }),
+      );
     });
 
     it('should throw NotFoundException if partnership not found', async () => {
-      const docRef = mockCollectionRef.doc('nonexistent');
-      (docRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: false,
-      });
-
       await expect(
         service.updatePartnership('nonexistent', { brandName: 'New' }),
       ).rejects.toThrow();
@@ -377,37 +287,19 @@ describe('BrandPartnershipsService', () => {
 
   describe('deletePartnership', () => {
     it('should delete a partnership', async () => {
-      const now = Timestamp.now();
-      const partnership: BrandPartnership = {
-        id: '1',
-        brandName: 'Test Brand',
-        isActive: true,
-        partnershipType: 'featured',
-        priority: 10,
-        startDate: now,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const docRef = mockCollectionRef.doc('1');
-      (docRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: true,
-        data: () => partnership,
-      });
-      (docRef.delete as jest.Mock) = jest.fn().mockResolvedValue(undefined);
-
       await service.deletePartnership('1');
 
-      expect(mockCollectionRef.doc).toHaveBeenCalledWith('1');
-      expect(docRef.get).toHaveBeenCalled();
-      expect(docRef.delete).toHaveBeenCalled();
+      expect(firebaseServiceMock.deleteDocument).toHaveBeenCalledWith(
+        'brandPartnerships',
+        '1',
+      );
     });
 
     it('should throw NotFoundException if partnership not found', async () => {
-      const docRef = mockCollectionRef.doc('nonexistent');
-      (docRef.get as jest.Mock) = jest.fn().mockResolvedValue({
-        exists: false,
-      });
+      // FirebaseService will throw if document doesn't exist
+      (firebaseServiceMock.deleteDocument as jest.Mock).mockRejectedValue(
+        new Error('Document not found'),
+      );
 
       await expect(service.deletePartnership('nonexistent')).rejects.toThrow();
     });

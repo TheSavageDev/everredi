@@ -1,7 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 export type CustomFieldType =
   | 'text'
@@ -29,24 +28,23 @@ export interface CustomFieldValue {
 
 @Injectable()
 export class CustomFieldsService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async getCustomFields(userId: string): Promise<CustomFieldDefinition[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('customFields')
-      .orderBy('order', 'asc')
-      .orderBy('name', 'asc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      userId,
-      ...doc.data(),
-    })) as CustomFieldDefinition[];
+    const fields =
+      await this.firebaseService.getSubcollection<CustomFieldDefinition>(
+        'users',
+        userId,
+        'customFields',
+        {
+          orderBy: { field: 'order', direction: 'asc' },
+        },
+      );
+    // Secondary sort by name (Firestore only supports one orderBy, so we do it in memory)
+    return fields.sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.name.localeCompare(b.name);
+    });
   }
 
   /**
@@ -98,12 +96,6 @@ export class CustomFieldsService {
       0,
     );
 
-    const fieldRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('customFields')
-      .doc();
-
     const field: Omit<CustomFieldDefinition, 'id'> = {
       userId,
       ...fieldData,
@@ -112,8 +104,12 @@ export class CustomFieldsService {
       updatedAt: now,
     };
 
-    await fieldRef.set(field);
-    return { id: fieldRef.id, ...field };
+    return this.firebaseService.addSubcollectionDocument<CustomFieldDefinition>(
+      'users',
+      userId,
+      'customFields',
+      field,
+    );
   }
 
   async updateCustomField(
@@ -123,55 +119,38 @@ export class CustomFieldsService {
       Omit<CustomFieldDefinition, 'id' | 'userId' | 'createdAt'>
     >,
   ): Promise<CustomFieldDefinition> {
-    const fieldRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('customFields')
-      .doc(fieldId);
-
-    const doc = await fieldRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Custom field not found');
-    }
-
-    await fieldRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const updatedDoc = await fieldRef.get();
-    return {
-      id: updatedDoc.id,
+    return this.firebaseService.updateSubcollectionDocument<CustomFieldDefinition>(
+      'users',
       userId,
-      ...updatedDoc.data(),
-    } as CustomFieldDefinition;
+      'customFields',
+      fieldId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deleteCustomField(userId: string, fieldId: string): Promise<void> {
-    const fieldRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('customFields')
-      .doc(fieldId);
-
-    const doc = await fieldRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Custom field not found');
-    }
-
-    await fieldRef.delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'customFields',
+      fieldId,
+    );
   }
 
   async reorderFields(userId: string, fieldIds: string[]): Promise<void> {
-    const batch = this.firestore.batch();
+    const batch = this.firebaseService.createBatch();
 
     fieldIds.forEach((fieldId, index) => {
-      const fieldRef = this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('customFields')
-        .doc(fieldId);
-      batch.update(fieldRef, { order: index, updatedAt: Timestamp.now() });
+      const ref = this.firebaseService.getSubcollectionDocumentRef(
+        'users',
+        userId,
+        'customFields',
+        fieldId,
+      );
+      batch.update(ref, { order: index, updatedAt: Timestamp.now() });
     });
 
     await batch.commit();

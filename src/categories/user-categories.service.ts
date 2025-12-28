@@ -1,7 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
 
 export interface UserCategory {
@@ -19,42 +18,38 @@ export interface UserCategory {
 @Injectable()
 export class UserCategoriesService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
   ) {}
 
   async getUserCategories(userId: string): Promise<UserCategory[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userCategories')
-      .orderBy('order', 'asc')
-      .orderBy('name', 'asc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      userId,
-      ...doc.data(),
-    })) as UserCategory[];
+    const categories =
+      await this.firebaseService.getSubcollection<UserCategory>(
+        'users',
+        userId,
+        'userCategories',
+        {
+          orderBy: { field: 'order', direction: 'asc' },
+        },
+      );
+    // Secondary sort by name (Firestore only supports one orderBy, so we do it in memory)
+    return categories.sort((a, b) => {
+      if ((a.order || 0) !== (b.order || 0))
+        return (a.order || 0) - (b.order || 0);
+      return a.name.localeCompare(b.name);
+    });
   }
 
   async getUserCategory(
     userId: string,
     categoryId: string,
   ): Promise<UserCategory | null> {
-    const doc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userCategories')
-      .doc(categoryId)
-      .get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    return { id: doc.id, userId, ...doc.data() } as UserCategory;
+    return this.firebaseService.getSubcollectionDocument<UserCategory>(
+      'users',
+      userId,
+      'userCategories',
+      categoryId,
+    );
   }
 
   async createUserCategory(
@@ -73,23 +68,18 @@ export class UserCategoriesService {
       0,
     );
 
-    const docRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userCategories')
-      .doc();
-
-    const category: Omit<UserCategory, 'id'> = {
+    return this.firebaseService.addSubcollectionDocument<UserCategory>(
+      'users',
       userId,
-      ...categoryData,
-      order: categoryData.order ?? maxOrder + 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await docRef.set(category);
-
-    return { id: docRef.id, ...category };
+      'userCategories',
+      {
+        userId,
+        ...categoryData,
+        order: categoryData.order ?? maxOrder + 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    );
   }
 
   async updateUserCategory(
@@ -97,54 +87,41 @@ export class UserCategoriesService {
     categoryId: string,
     updates: Partial<Omit<UserCategory, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<UserCategory> {
-    const categoryRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userCategories')
-      .doc(categoryId);
-
-    const doc = await categoryRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Category not found');
-    }
-
-    await categoryRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const updatedDoc = await categoryRef.get();
-    return { id: updatedDoc.id, userId, ...updatedDoc.data() } as UserCategory;
+    return this.firebaseService.updateSubcollectionDocument<UserCategory>(
+      'users',
+      userId,
+      'userCategories',
+      categoryId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deleteUserCategory(userId: string, categoryId: string): Promise<void> {
-    const categoryRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userCategories')
-      .doc(categoryId);
-
-    const doc = await categoryRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Category not found');
-    }
-
-    await categoryRef.delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'userCategories',
+      categoryId,
+    );
   }
 
   async reorderCategories(
     userId: string,
     categoryIds: string[],
   ): Promise<void> {
-    const batch = this.firestore.batch();
+    const batch = this.firebaseService.createBatch();
 
     categoryIds.forEach((categoryId, index) => {
-      const categoryRef = this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('userCategories')
-        .doc(categoryId);
-      batch.update(categoryRef, { order: index, updatedAt: Timestamp.now() });
+      const ref = this.firebaseService.getSubcollectionDocumentRef(
+        'users',
+        userId,
+        'userCategories',
+        categoryId,
+      );
+      batch.update(ref, { order: index, updatedAt: Timestamp.now() });
     });
 
     await batch.commit();

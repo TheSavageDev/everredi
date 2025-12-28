@@ -1,13 +1,10 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 @Injectable()
 export class ExpirationService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async getExpiringItemsByThreshold(
     userId: string,
@@ -21,23 +18,21 @@ export class ExpirationService {
       );
       const now = Timestamp.now();
 
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('inventoryItems')
-        .where('status', '==', 'active')
-        .where('expirationDate', '>=', now)
-        .where('expirationDate', '<=', thresholdDate)
-        .orderBy('expirationDate', 'asc')
-        .get();
+      const items = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'inventoryItems',
+        {
+          where: [
+            { field: 'status', operator: '==', value: 'active' },
+            { field: 'expirationDate', operator: '>=', value: now },
+            { field: 'expirationDate', operator: '<=', value: thresholdDate },
+          ],
+          orderBy: { field: 'expirationDate', direction: 'asc' },
+        },
+      );
 
-      const items = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        thresholdDays: days,
-      }));
-
-      results.push(...items);
+      results.push(...items.map((item) => ({ ...item, thresholdDays: days })));
     }
 
     return results;
@@ -47,16 +42,16 @@ export class ExpirationService {
     userId: string,
     updates: Array<{ itemId: string; expirationDate: Timestamp }>,
   ): Promise<void> {
-    const batch = this.firestore.batch();
+    const batch = this.firebaseService.createBatch();
 
     for (const update of updates) {
-      const itemRef = this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('inventoryItems')
-        .doc(update.itemId);
-
-      batch.update(itemRef, {
+      const ref = this.firebaseService.getSubcollectionDocumentRef(
+        'users',
+        userId,
+        'inventoryItems',
+        update.itemId,
+      );
+      batch.update(ref, {
         expirationDate: update.expirationDate,
         updatedAt: Timestamp.now(),
       });

@@ -56,11 +56,44 @@ async function bootstrap() {
 
     // Enable CORS
     // Use ConfigService to properly read environment variables (especially in Cloud Run)
+    const corsOriginRaw = configService.get<string>('CORS_ORIGIN');
+    const corsOriginFromEnv = process.env.CORS_ORIGIN;
     const corsOrigin =
-      configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000';
+      corsOriginRaw || corsOriginFromEnv || 'http://localhost:3000';
+
+    // Log CORS configuration for debugging
+    logger.log(`🌐 CORS configuration:`);
+    logger.log(
+      `   CORS_ORIGIN from ConfigService: ${corsOriginRaw || '(not set)'}`,
+    );
+    logger.log(
+      `   CORS_ORIGIN from process.env: ${corsOriginFromEnv || '(not set)'}`,
+    );
+    logger.log(`   Resolved CORS_ORIGIN: ${corsOrigin}`);
+
+    // Warn if there's a mismatch between ConfigService and process.env
+    if (
+      corsOriginRaw &&
+      corsOriginFromEnv &&
+      corsOriginRaw !== corsOriginFromEnv
+    ) {
+      logger.warn(
+        `   ⚠️  Mismatch detected: ConfigService="${corsOriginRaw}" vs process.env="${corsOriginFromEnv}"`,
+      );
+    }
+
+    // Helper function to normalize origins (lowercase, remove trailing slashes)
+    const normalizeOrigin = (origin: string): string => {
+      return origin.trim().toLowerCase().replace(/\/$/, '');
+    };
 
     // Support multiple origins (comma-separated) or single origin
-    const allowedOrigins = corsOrigin.split(',').map((origin) => origin.trim());
+    const allowedOriginsRaw = corsOrigin
+      .split(',')
+      .map((origin) => origin.trim());
+    const allowedOrigins = allowedOriginsRaw.map(normalizeOrigin);
+
+    logger.log(`   Allowed origins (normalized): ${allowedOrigins.join(', ')}`);
 
     // In staging/production, also allow the Cloud Run service URL
     // This allows both the vanity URL and the default Cloud Run URL to work
@@ -69,6 +102,7 @@ async function bootstrap() {
       // Get the Cloud Run service name from environment
       // K_SERVICE is set by Cloud Run (e.g., "everredi-api-staging")
       const serviceName = process.env.K_SERVICE;
+      logger.log(`   Cloud Run service name: ${serviceName || '(not set)'}`);
 
       // Cloud Run URLs have format: https://<service-name>-<hash>-<region>.a.run.app
       // We'll match any URL that contains the service name and ends with .a.run.app
@@ -79,12 +113,19 @@ async function bootstrap() {
         ) => {
           // Allow requests with no origin (e.g., mobile apps, Postman)
           if (!origin) {
+            logger.debug('CORS: Allowing request with no origin');
             callback(null, true);
             return;
           }
 
-          // Allow if origin is in the explicitly allowed list
-          if (allowedOrigins.includes(origin)) {
+          const normalizedOrigin = normalizeOrigin(origin);
+          logger.debug(
+            `CORS: Checking origin "${origin}" (normalized: "${normalizedOrigin}")`,
+          );
+
+          // Allow if origin is in the explicitly allowed list (case-insensitive)
+          if (allowedOrigins.includes(normalizedOrigin)) {
+            logger.debug(`CORS: ✅ Allowed - origin matches allowed list`);
             callback(null, true);
             return;
           }
@@ -93,23 +134,61 @@ async function bootstrap() {
           // Pattern: https://<service-name>-<hash>-<region>.a.run.app
           if (
             serviceName &&
-            origin.includes(serviceName) &&
-            origin.endsWith('.a.run.app')
+            normalizedOrigin.includes(serviceName.toLowerCase()) &&
+            normalizedOrigin.endsWith('.a.run.app')
           ) {
+            logger.debug(
+              `CORS: ✅ Allowed - origin matches Cloud Run service URL pattern`,
+            );
             callback(null, true);
             return;
           }
 
           // Reject all other origins
-          callback(new Error('Not allowed by CORS'));
+          logger.warn(
+            `CORS: ❌ Rejected origin "${origin}" (normalized: "${normalizedOrigin}")`,
+          );
+          logger.warn(`   Allowed origins: ${allowedOrigins.join(', ')}`);
+          if (serviceName) {
+            logger.warn(
+              `   Or Cloud Run URLs matching: *${serviceName}*.a.run.app`,
+            );
+          }
+          callback(
+            new Error(
+              `Not allowed by CORS: origin "${origin}" is not in the allowed list`,
+            ),
+          );
         },
         credentials: true,
       });
     } else {
-      // Development: use simple origin matching
+      // Development: use simple origin matching (case-insensitive)
+      logger.log(`   Development mode: using simple origin matching`);
       app.enableCors({
-        origin:
-          allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+        origin: (
+          origin: string | undefined,
+          callback: (err: Error | null, allow?: boolean) => void,
+        ) => {
+          if (!origin) {
+            callback(null, true);
+            return;
+          }
+
+          const normalizedOrigin = normalizeOrigin(origin);
+          if (allowedOrigins.includes(normalizedOrigin)) {
+            logger.debug(`CORS: ✅ Allowed origin "${origin}"`);
+            callback(null, true);
+            return;
+          }
+
+          logger.warn(`CORS: ❌ Rejected origin "${origin}"`);
+          callback(
+            new Error(
+              `Not allowed by CORS: origin "${origin}" is not in the allowed list`,
+            ),
+          );
+        },
         credentials: true,
       });
     }
@@ -133,10 +212,6 @@ async function bootstrap() {
     await app.listen(port);
 
     logger.log(`✅ Application is running on port ${port}/api`);
-    logger.log(`🌐 CORS enabled for origins: ${allowedOrigins.join(', ')}`);
-    if (isProduction) {
-      logger.log(`   Also allowing Cloud Run service URL pattern`);
-    }
     logger.log(
       `🏥 Health check available at: http://0.0.0.0:${port}/api/health`,
     );

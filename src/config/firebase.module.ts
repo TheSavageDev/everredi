@@ -1,15 +1,25 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from './config.module';
 import {
-  firebaseAdminProvider,
+  FirebaseApp,
   firestoreProvider,
   firebaseAuthProvider,
+  FIRESTORE,
+  FIREBASE_AUTH,
 } from './firebase.provider';
+import { FirebaseService } from './firebase.service';
+import { FirebaseController } from './firebase.controller';
 
 @Global()
 @Module({
   imports: [ConfigModule],
-  providers: [firebaseAdminProvider, firestoreProvider, firebaseAuthProvider],
-  exports: [firebaseAdminProvider, firestoreProvider, firebaseAuthProvider],
+  controllers: [FirebaseController],
+  providers: [
+    FirebaseApp,
+    firestoreProvider,
+    firebaseAuthProvider,
+    FirebaseService,
+  ],
+  exports: [FirebaseApp, FIRESTORE, FIREBASE_AUTH, FirebaseService],
 })
 export class FirebaseModule {}

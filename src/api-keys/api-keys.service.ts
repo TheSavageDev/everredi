@@ -1,7 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import * as crypto from 'crypto';
 
 export interface ApiKey {
@@ -17,9 +16,7 @@ export interface ApiKey {
 
 @Injectable()
 export class ApiKeysService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async generateApiKey(
     userId: string,
@@ -37,57 +34,51 @@ export class ApiKeysService {
         )
       : undefined;
 
-    const apiKeyRef = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('apiKeys')
-      .add({
+    const apiKey = await this.firebaseService.addSubcollectionDocument<ApiKey>(
+      'users',
+      userId,
+      'apiKeys',
+      {
         name,
         keyHash,
         createdAt: now,
         expiresAt,
         isActive: true,
-      });
-
-    const apiKeyDoc = await apiKeyRef.get();
-    const apiKey = { id: apiKeyDoc.id, userId, ...apiKeyDoc.data() } as ApiKey;
+      },
+    );
 
     // Return the plain key only once (for display to user)
     return { key, apiKey };
   }
 
   async getApiKeys(userId: string): Promise<Omit<ApiKey, 'keyHash'>[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('apiKeys')
-      .orderBy('createdAt', 'desc')
-      .get();
+    const apiKeys = await this.firebaseService.getSubcollection<ApiKey>(
+      'users',
+      userId,
+      'apiKeys',
+      {
+        orderBy: { field: 'createdAt', direction: 'desc' },
+      },
+    );
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      const { keyHash, ...rest } = data;
+    return apiKeys.map((apiKey) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { keyHash, ...rest } = apiKey;
       return {
-        id: doc.id,
-        userId,
         ...rest,
+        userId,
       } as Omit<ApiKey, 'keyHash'>;
     });
   }
 
   async revokeApiKey(userId: string, keyId: string): Promise<void> {
-    const keyRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('apiKeys')
-      .doc(keyId);
-
-    const keyDoc = await keyRef.get();
-    if (!keyDoc.exists) {
-      throw new NotFoundException('API key not found');
-    }
-
-    await keyRef.update({ isActive: false });
+    await this.firebaseService.updateSubcollectionDocument(
+      'users',
+      userId,
+      'apiKeys',
+      keyId,
+      { isActive: false },
+    );
   }
 
   async getApiKeyUsage(
@@ -96,21 +87,21 @@ export class ApiKeysService {
   ): Promise<{ usageCount: number; lastUsed?: Timestamp }> {
     // This would typically query a usage tracking collection
     // For now, return basic info from the key itself
-    const keyDoc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('apiKeys')
-      .doc(keyId)
-      .get();
+    const key = await this.firebaseService.getSubcollectionDocument<ApiKey>(
+      'users',
+      userId,
+      'apiKeys',
+      keyId,
+      { throwIfNotFound: true },
+    );
 
-    if (!keyDoc.exists) {
+    if (!key) {
       throw new NotFoundException('API key not found');
     }
 
-    const data = keyDoc.data() as ApiKey;
     return {
       usageCount: 0, // TODO: Implement usage tracking
-      lastUsed: data.lastUsed,
+      lastUsed: key.lastUsed,
     };
   }
 
@@ -120,21 +111,26 @@ export class ApiKeysService {
     const keyHash = this.hashKey(key);
 
     // Search all users' API keys for matching hash
-    const allUsersSnapshot = await this.firestore.collection('users').get();
+    const allUsers = await this.firebaseService.getCollection<{ id: string }>(
+      'users',
+    );
 
-    for (const userDoc of allUsersSnapshot.docs) {
-      const keysSnapshot = await this.firestore
-        .collection('users')
-        .doc(userDoc.id)
-        .collection('apiKeys')
-        .where('keyHash', '==', keyHash)
-        .where('isActive', '==', true)
-        .limit(1)
-        .get();
+    for (const user of allUsers) {
+      const keys = await this.firebaseService.getSubcollection<ApiKey>(
+        'users',
+        user.id,
+        'apiKeys',
+        {
+          where: [
+            { field: 'keyHash', operator: '==', value: keyHash },
+            { field: 'isActive', operator: '==', value: true },
+          ],
+          limit: 1,
+        },
+      );
 
-      if (!keysSnapshot.empty) {
-        const keyDoc = keysSnapshot.docs[0];
-        const keyData = keyDoc.data() as ApiKey;
+      if (keys.length > 0) {
+        const keyData = keys[0];
 
         // Check expiration
         if (keyData.expiresAt && keyData.expiresAt.toMillis() < Date.now()) {
@@ -142,11 +138,17 @@ export class ApiKeysService {
         }
 
         // Update last used
-        await keyDoc.ref.update({ lastUsed: Timestamp.now() });
+        await this.firebaseService.updateSubcollectionDocument(
+          'users',
+          user.id,
+          'apiKeys',
+          keyData.id,
+          { lastUsed: Timestamp.now() },
+        );
 
         return {
-          userId: userDoc.id,
-          keyId: keyDoc.id,
+          userId: user.id,
+          keyId: keyData.id,
         };
       }
     }

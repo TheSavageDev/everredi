@@ -1,7 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
 
 export interface AlertThreshold {
@@ -40,23 +39,19 @@ export interface NotificationPreferences {
 @Injectable()
 export class AdvancedNotificationsService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
   ) {}
 
   async getAlertThresholds(userId: string): Promise<AlertThreshold[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('alertThresholds')
-      .where('isActive', '==', true)
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
+    return this.firebaseService.getSubcollection<AlertThreshold>(
+      'users',
       userId,
-      ...doc.data(),
-    })) as AlertThreshold[];
+      'alertThresholds',
+      {
+        where: [{ field: 'isActive', operator: '==', value: true }],
+      },
+    );
   }
 
   async createAlertThreshold(
@@ -66,23 +61,18 @@ export class AdvancedNotificationsService {
       'id' | 'userId' | 'createdAt' | 'updatedAt'
     >,
   ): Promise<AlertThreshold> {
-    const now = Timestamp.now();
-    const docRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('alertThresholds')
-      .doc();
-
-    const threshold: Omit<AlertThreshold, 'id'> = {
+    return this.firebaseService.addSubcollectionDocument<AlertThreshold>(
+      'users',
       userId,
-      ...thresholdData,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await docRef.set(threshold);
-    return { id: docRef.id, ...threshold };
+      'alertThresholds',
+      {
+        userId,
+        ...thresholdData,
+        isActive: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async updateAlertThreshold(
@@ -90,69 +80,57 @@ export class AdvancedNotificationsService {
     thresholdId: string,
     updates: Partial<Omit<AlertThreshold, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<AlertThreshold> {
-    const thresholdRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('alertThresholds')
-      .doc(thresholdId);
-
-    await thresholdRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const doc = await thresholdRef.get();
-    return { id: doc.id, userId, ...doc.data() } as AlertThreshold;
+    return this.firebaseService.updateSubcollectionDocument<AlertThreshold>(
+      'users',
+      userId,
+      'alertThresholds',
+      thresholdId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deleteAlertThreshold(
     userId: string,
     thresholdId: string,
   ): Promise<void> {
-    await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('alertThresholds')
-      .doc(thresholdId)
-      .delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'alertThresholds',
+      thresholdId,
+    );
   }
 
   async getLowStockAlerts(userId: string): Promise<LowStockAlert[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('lowStockAlerts')
-      .where('isActive', '==', true)
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
+    return this.firebaseService.getSubcollection<LowStockAlert>(
+      'users',
       userId,
-      ...doc.data(),
-    })) as LowStockAlert[];
+      'lowStockAlerts',
+      {
+        where: [{ field: 'isActive', operator: '==', value: true }],
+      },
+    );
   }
 
   async createLowStockAlert(
     userId: string,
     alertData: Omit<LowStockAlert, 'id' | 'userId' | 'createdAt' | 'updatedAt'>,
   ): Promise<LowStockAlert> {
-    const now = Timestamp.now();
-    const docRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('lowStockAlerts')
-      .doc();
-
-    const alert: Omit<LowStockAlert, 'id'> = {
+    return this.firebaseService.addSubcollectionDocument<LowStockAlert>(
+      'users',
       userId,
-      ...alertData,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await docRef.set(alert);
-    return { id: docRef.id, ...alert };
+      'lowStockAlerts',
+      {
+        userId,
+        ...alertData,
+        isActive: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async updateLowStockAlert(
@@ -160,41 +138,39 @@ export class AdvancedNotificationsService {
     alertId: string,
     updates: Partial<Omit<LowStockAlert, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<LowStockAlert> {
-    const alertRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('lowStockAlerts')
-      .doc(alertId);
-
-    await alertRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const doc = await alertRef.get();
-    return { id: doc.id, userId, ...doc.data() } as LowStockAlert;
+    return this.firebaseService.updateSubcollectionDocument<LowStockAlert>(
+      'users',
+      userId,
+      'lowStockAlerts',
+      alertId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deleteLowStockAlert(userId: string, alertId: string): Promise<void> {
-    await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('lowStockAlerts')
-      .doc(alertId)
-      .delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'lowStockAlerts',
+      alertId,
+    );
   }
 
   async getNotificationPreferences(
     userId: string,
   ): Promise<NotificationPreferences | null> {
-    const doc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notificationPreferences')
-      .doc('preferences')
-      .get();
+    const prefs =
+      await this.firebaseService.getSubcollectionDocument<NotificationPreferences>(
+        'users',
+        userId,
+        'notificationPreferences',
+        'preferences',
+      );
 
-    if (!doc.exists) {
+    if (!prefs) {
       // Return defaults
       return {
         userId,
@@ -208,42 +184,50 @@ export class AdvancedNotificationsService {
       };
     }
 
-    return { userId, ...doc.data() } as NotificationPreferences;
+    return prefs;
   }
 
   async updateNotificationPreferences(
     userId: string,
     preferences: Partial<Omit<NotificationPreferences, 'userId' | 'updatedAt'>>,
   ): Promise<NotificationPreferences> {
-    const prefsRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notificationPreferences')
-      .doc('preferences');
-
-    const existing = await prefsRef.get();
+    const existing = await this.firebaseService.getSubcollectionDocument(
+      'users',
+      userId,
+      'notificationPreferences',
+      'preferences',
+    );
     const now = Timestamp.now();
 
-    if (!existing.exists) {
-      await prefsRef.set({
+    if (!existing) {
+      return this.firebaseService.setSubcollectionDocument<NotificationPreferences>(
+        'users',
         userId,
-        emailEnabled: true,
-        pushEnabled: true,
-        emailFrequency: 'immediate',
-        expirationAlertsEnabled: true,
-        lowStockAlertsEnabled: true,
-        usageRemindersEnabled: false,
-        ...preferences,
-        updatedAt: now,
-      });
+        'notificationPreferences',
+        'preferences',
+        {
+          userId,
+          emailEnabled: true,
+          pushEnabled: true,
+          emailFrequency: 'immediate',
+          expirationAlertsEnabled: true,
+          lowStockAlertsEnabled: true,
+          usageRemindersEnabled: false,
+          ...preferences,
+          updatedAt: now,
+        },
+      );
     } else {
-      await prefsRef.update({
-        ...preferences,
-        updatedAt: now,
-      });
+      return this.firebaseService.updateSubcollectionDocument<NotificationPreferences>(
+        'users',
+        userId,
+        'notificationPreferences',
+        'preferences',
+        {
+          ...preferences,
+          updatedAt: now,
+        },
+      );
     }
-
-    const doc = await prefsRef.get();
-    return { userId, ...doc.data() } as NotificationPreferences;
   }
 }

@@ -1,7 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
 
 export interface SupportTicket {
@@ -20,7 +19,7 @@ export interface SupportTicket {
 @Injectable()
 export class SupportService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -41,7 +40,7 @@ export class SupportService {
         : ticketData.priority
       : ticketData.priority;
 
-    const ticketRef = await this.firestore.collection('supportTickets').add({
+    return this.firebaseService.addDocument<SupportTicket>('supportTickets', {
       userId,
       ...ticketData,
       priority,
@@ -50,44 +49,27 @@ export class SupportService {
       createdAt: now,
       updatedAt: now,
     });
-
-    const ticketDoc = await ticketRef.get();
-    return {
-      id: ticketDoc.id,
-      userId,
-      isPremium,
-      ...ticketDoc.data(),
-    } as SupportTicket;
   }
 
   async getTicketsByUser(userId: string): Promise<SupportTicket[]> {
-    const snapshot = await this.firestore
-      .collection('supportTickets')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      userId,
-      ...doc.data(),
-    })) as SupportTicket[];
+    return this.firebaseService.getCollection<SupportTicket>('supportTickets', {
+      where: [{ field: 'userId', operator: '==', value: userId }],
+      orderBy: { field: 'createdAt', direction: 'desc' },
+    });
   }
 
   async getTicket(
     userId: string,
     ticketId: string,
   ): Promise<SupportTicket | null> {
-    const doc = await this.firestore
-      .collection('supportTickets')
-      .doc(ticketId)
-      .get();
+    const ticket = await this.firebaseService.getDocument<SupportTicket>(
+      'supportTickets',
+      ticketId,
+    );
 
-    if (!doc.exists) {
+    if (!ticket) {
       return null;
     }
-
-    const ticket = { id: doc.id, ...doc.data() } as SupportTicket;
 
     // Verify ticket belongs to user
     if (ticket.userId !== userId) {
@@ -107,7 +89,7 @@ export class SupportService {
       throw new Error('Ticket not found');
     }
 
-    const updateData: any = {
+    const updateData: Partial<SupportTicket> = {
       ...updates,
       updatedAt: Timestamp.now(),
     };
@@ -116,15 +98,10 @@ export class SupportService {
       updateData.resolvedAt = Timestamp.now();
     }
 
-    await this.firestore
-      .collection('supportTickets')
-      .doc(ticketId)
-      .update(updateData);
-
-    const updatedDoc = await this.firestore
-      .collection('supportTickets')
-      .doc(ticketId)
-      .get();
-    return { id: updatedDoc.id, userId, ...updatedDoc.data() } as SupportTicket;
+    return this.firebaseService.updateDocument<SupportTicket>(
+      'supportTickets',
+      ticketId,
+      updateData,
+    );
   }
 }

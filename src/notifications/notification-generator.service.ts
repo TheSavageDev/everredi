@@ -1,16 +1,13 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
-import type { firestore } from 'firebase-admin';
-// Timestamp is used in this file but linter doesn't detect it
-
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 @Injectable()
 export class NotificationGeneratorService {
   constructor(
     private readonly notificationsService: NotificationsService,
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   async generateExpirationNotifications(
@@ -23,17 +20,20 @@ export class NotificationGeneratorService {
       );
       const now = Timestamp.now();
 
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('inventoryItems')
-        .where('status', '==', 'active')
-        .where('expirationDate', '>=', now)
-        .where('expirationDate', '<=', thresholdDate)
-        .get();
+      const items = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'inventoryItems',
+        {
+          where: [
+            { field: 'status', operator: '==', value: 'active' },
+            { field: 'expirationDate', operator: '>=', value: now },
+            { field: 'expirationDate', operator: '<=', value: thresholdDate },
+          ],
+        },
+      );
 
-      for (const doc of snapshot.docs) {
-        const item = doc.data();
+      for (const item of items) {
         const expirationDate = item.expirationDate.toDate();
         const daysUntil = Math.ceil(
           (expirationDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
@@ -44,7 +44,7 @@ export class NotificationGeneratorService {
           title: 'Item Expiring Soon',
           message: `${item.supplyName} expires in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
           data: {
-            inventoryItemId: doc.id,
+            inventoryItemId: item.id,
             expirationDate: item.expirationDate,
           },
           isRead: false,
@@ -55,22 +55,25 @@ export class NotificationGeneratorService {
   }
 
   async generateLowStockNotifications(userId: string, threshold: number = 5) {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .where('status', '==', 'active')
-      .where('quantity', '<=', threshold)
-      .get();
+    const items = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'inventoryItems',
+      {
+        where: [
+          { field: 'status', operator: '==', value: 'active' },
+          { field: 'quantity', operator: '<=', value: threshold },
+        ],
+      },
+    );
 
-    for (const doc of snapshot.docs) {
-      const item = doc.data();
+    for (const item of items) {
       await this.notificationsService.createNotification(userId, {
         type: 'low_stock',
         title: 'Low Stock Alert',
         message: `${item.supplyName} is running low (${item.quantity} remaining)`,
         data: {
-          inventoryItemId: doc.id,
+          inventoryItemId: item.id,
         },
         isRead: false,
         sentAt: Timestamp.now(),

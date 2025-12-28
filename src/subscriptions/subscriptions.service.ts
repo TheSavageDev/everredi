@@ -1,16 +1,15 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { StripeService } from './stripe.service';
 import { UsersService } from '../users/users.service';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 @Injectable()
 export class SubscriptionsService {
   constructor(
     private readonly stripeService: StripeService,
     private readonly usersService: UsersService,
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   async createCheckoutSession(
@@ -120,12 +119,9 @@ export class SubscriptionsService {
   }
 
   private async updateUserSubscription(userId: string, updates: any) {
-    await this.firestore
-      .collection('users')
-      .doc(userId)
-      .update({
-        ...updates,
-        updatedAt: Timestamp.now(),
-      });
+    await this.firebaseService.updateDocument('users', userId, {
+      ...updates,
+      updatedAt: Timestamp.now(),
+    });
   }
 }

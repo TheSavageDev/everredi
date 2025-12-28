@@ -1,28 +1,44 @@
 import { NotificationsService } from '../notifications.service';
-import type { firestore } from 'firebase-admin';
+import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
 
 describe('NotificationsService', () => {
-  const firestoreMock: Partial<firestore.Firestore> = {
-    collection: jest.fn().mockReturnThis() as any,
-    doc: jest.fn().mockReturnThis() as any,
-    where: jest.fn().mockReturnThis() as any,
-    orderBy: jest.fn().mockReturnThis() as any,
-    limit: jest.fn().mockReturnThis() as any,
-    get: jest.fn().mockResolvedValue({
-      docs: [],
-    }) as any,
-    update: jest.fn().mockResolvedValue(undefined) as any,
-  };
+  const firebaseServiceMock = createFirebaseServiceMock();
 
   let service: NotificationsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new NotificationsService(firestoreMock as any);
+    (firebaseServiceMock._clearAll as jest.Mock)();
+    service = new NotificationsService(firebaseServiceMock as any);
   });
 
   it('retrieves notifications for a user', async () => {
+    // Setup mock data
+    (firebaseServiceMock._setMockData as jest.Mock)(
+      'users/user-1/notifications',
+      [
+        {
+          id: 'notif-1',
+          userId: 'user-1',
+          type: 'expiration',
+          title: 'Test',
+          message: 'Test message',
+          isRead: false,
+          createdAt: {} as any,
+        },
+      ],
+    );
+
     const notifications = await service.getNotifications('user-1');
     expect(Array.isArray(notifications)).toBe(true);
+    expect(firebaseServiceMock.getSubcollection).toHaveBeenCalledWith(
+      'users',
+      'user-1',
+      'notifications',
+      expect.objectContaining({
+        orderBy: { field: 'createdAt', direction: 'desc' },
+        limit: 100,
+      }),
+    );
   });
 });

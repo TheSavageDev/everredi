@@ -1,7 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 export interface BrandPartnership {
   id: string;
@@ -21,9 +20,7 @@ export interface BrandPartnership {
 
 @Injectable()
 export class BrandPartnershipsService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   /**
    * Gets all active brand partnerships, optionally filtered by category.
@@ -51,16 +48,16 @@ export class BrandPartnershipsService {
     categoryIds?: string[],
   ): Promise<BrandPartnership[]> {
     const now = Timestamp.now();
-    const query = this.firestore
-      .collection('brandPartnerships')
-      .where('isActive', '==', true)
-      .where('startDate', '<=', now);
-
-    const snapshot = await query.get();
-    let partnerships = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as BrandPartnership[];
+    let partnerships =
+      await this.firebaseService.getCollection<BrandPartnership>(
+        'brandPartnerships',
+        {
+          where: [
+            { field: 'isActive', operator: '==', value: true },
+            { field: 'startDate', operator: '<=', value: now },
+          ],
+        },
+      );
 
     // Filter out expired partnerships
     partnerships = partnerships.filter((p) => {
@@ -91,81 +88,62 @@ export class BrandPartnershipsService {
   }
 
   async getAllPartnerships(): Promise<BrandPartnership[]> {
-    const snapshot = await this.firestore
-      .collection('brandPartnerships')
-      .orderBy('priority', 'desc')
-      .orderBy('brandName', 'asc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as BrandPartnership[];
+    const partnerships =
+      await this.firebaseService.getCollection<BrandPartnership>(
+        'brandPartnerships',
+        {
+          orderBy: { field: 'priority', direction: 'desc' },
+        },
+      );
+    // Secondary sort by brandName (Firestore only supports one orderBy, so we do it in memory)
+    return partnerships.sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return b.priority - a.priority;
+      }
+      return a.brandName.localeCompare(b.brandName);
+    });
   }
 
   async getPartnership(
     partnershipId: string,
   ): Promise<BrandPartnership | null> {
-    const doc = await this.firestore
-      .collection('brandPartnerships')
-      .doc(partnershipId)
-      .get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    return { id: doc.id, ...doc.data() } as BrandPartnership;
+    return this.firebaseService.getDocument<BrandPartnership>(
+      'brandPartnerships',
+      partnershipId,
+    );
   }
 
   async createPartnership(
     partnershipData: Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<BrandPartnership> {
-    const now = Timestamp.now();
-    const partnershipRef = this.firestore.collection('brandPartnerships').doc();
-
-    const partnership: Omit<BrandPartnership, 'id'> = {
-      ...partnershipData,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await partnershipRef.set(partnership);
-    return { id: partnershipRef.id, ...partnership };
+    return this.firebaseService.addDocument<BrandPartnership>(
+      'brandPartnerships',
+      {
+        ...partnershipData,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async updatePartnership(
     partnershipId: string,
     updates: Partial<Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>>,
   ): Promise<BrandPartnership> {
-    const partnershipRef = this.firestore
-      .collection('brandPartnerships')
-      .doc(partnershipId);
-
-    const doc = await partnershipRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Brand partnership not found');
-    }
-
-    await partnershipRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const updatedDoc = await partnershipRef.get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as BrandPartnership;
+    return this.firebaseService.updateDocument<BrandPartnership>(
+      'brandPartnerships',
+      partnershipId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deletePartnership(partnershipId: string): Promise<void> {
-    const partnershipRef = this.firestore
-      .collection('brandPartnerships')
-      .doc(partnershipId);
-
-    const doc = await partnershipRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Brand partnership not found');
-    }
-
-    await partnershipRef.delete();
+    await this.firebaseService.deleteDocument(
+      'brandPartnerships',
+      partnershipId,
+    );
   }
 }

@@ -1,7 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 export interface AffiliateClick {
   id: string;
@@ -21,50 +20,38 @@ export interface TrackClickDto {
 
 @Injectable()
 export class AffiliateTrackingService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async trackClick(
     userId: string,
     dto: TrackClickDto,
   ): Promise<AffiliateClick> {
     // Get supply information to include in tracking
-    const supplyDoc = await this.firestore
-      .collection('supplies')
-      .doc(dto.supplyId)
-      .get();
+    const supply = await this.firebaseService.getDocument<{
+      affiliateLink?: string;
+      name?: string;
+    }>('supplies', dto.supplyId, { throwIfNotFound: true });
 
-    if (!supplyDoc.exists) {
+    if (!supply) {
       throw new Error(`Supply with id ${dto.supplyId} not found`);
     }
 
-    const supplyData = supplyDoc.data();
-    const affiliateLink = supplyData?.affiliateLink;
+    const affiliateLink = supply.affiliateLink;
 
     if (!affiliateLink) {
       throw new Error(`Supply ${dto.supplyId} does not have an affiliate link`);
     }
 
     // Create click tracking document
-    const clickData: Omit<AffiliateClick, 'id'> = {
+    return this.firebaseService.addDocument<AffiliateClick>('affiliateClicks', {
       userId,
       supplyId: dto.supplyId,
-      supplyName: supplyData?.name,
+      supplyName: supply.name,
       affiliateLink,
       source: dto.source,
       timestamp: Timestamp.now(),
       createdAt: Timestamp.now(),
-    };
-
-    const docRef = await this.firestore
-      .collection('affiliateClicks')
-      .add(clickData);
-
-    return {
-      id: docRef.id,
-      ...clickData,
-    };
+    });
   }
 
   async getClicksByUser(
@@ -73,29 +60,23 @@ export class AffiliateTrackingService {
   ): Promise<AffiliateClick[]> {
     try {
       // Try query with orderBy (requires composite index)
-      const snapshot = await this.firestore
-        .collection('affiliateClicks')
-        .where('userId', '==', userId)
-        .orderBy('timestamp', 'desc')
-        .limit(limit)
-        .get();
-
-      return snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as AffiliateClick[];
+      return this.firebaseService.getCollection<AffiliateClick>(
+        'affiliateClicks',
+        {
+          where: [{ field: 'userId', operator: '==', value: userId }],
+          orderBy: { field: 'timestamp', direction: 'desc' },
+          limit,
+        },
+      );
     } catch (error: any) {
       // If index doesn't exist, fall back to query without orderBy and sort in memory
       if (error.code === 9 || error.message?.includes('index')) {
-        const snapshot = await this.firestore
-          .collection('affiliateClicks')
-          .where('userId', '==', userId)
-          .get();
-
-        const clicks = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as AffiliateClick[];
+        const clicks = await this.firebaseService.getCollection<AffiliateClick>(
+          'affiliateClicks',
+          {
+            where: [{ field: 'userId', operator: '==', value: userId }],
+          },
+        );
 
         // Sort by timestamp descending in memory
         clicks.sort((a, b) => {

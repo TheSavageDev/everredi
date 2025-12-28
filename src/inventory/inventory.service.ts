@@ -1,13 +1,11 @@
 import {
   ForbiddenException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
 
 const logger = new Logger('InventoryService');
@@ -38,7 +36,7 @@ export interface InventoryItem {
 @Injectable()
 export class InventoryService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -69,34 +67,31 @@ export class InventoryService {
   }
 
   async getInventoryItems(userId: string): Promise<InventoryItem[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as InventoryItem[];
+    return this.firebaseService.getSubcollection<InventoryItem>(
+      'users',
+      userId,
+      'inventoryItems',
+    );
   }
 
   async getInventoryItem(
     userId: string,
     itemId: string,
   ): Promise<InventoryItem> {
-    const doc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .doc(itemId)
-      .get();
+    const item =
+      await this.firebaseService.getSubcollectionDocument<InventoryItem>(
+        'users',
+        userId,
+        'inventoryItems',
+        itemId,
+        { throwIfNotFound: true },
+      );
 
-    if (!doc.exists) {
+    if (!item) {
       throw new NotFoundException('Inventory item not found');
     }
 
-    return { id: doc.id, ...doc.data() } as InventoryItem;
+    return item;
   }
 
   /**
@@ -134,14 +129,16 @@ export class InventoryService {
     const isPremium = await this.usersService.isPremiumUser(userId);
 
     if (!isPremium) {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('inventoryItems')
-        .where('status', '==', 'active')
-        .get();
+      const activeItems = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'inventoryItems',
+        {
+          where: [{ field: 'status', operator: '==', value: 'active' }],
+        },
+      );
 
-      const activeCount = snapshot.size;
+      const activeCount = activeItems.length;
       const maxFreeItems = 100;
 
       if (activeCount >= maxFreeItems) {
@@ -154,13 +151,6 @@ export class InventoryService {
     }
 
     const now = Timestamp.now();
-
-    // Create document reference
-    const docRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .doc();
 
     // Convert date strings to Firestore Timestamps
     const expirationTimestamp = this.convertToTimestamp(
@@ -196,10 +186,12 @@ export class InventoryService {
       documentData.sentNotifications = [];
     }
 
-    await docRef.set(documentData);
-
-    const doc = await docRef.get();
-    return { id: doc.id, ...doc.data() } as InventoryItem;
+    return this.firebaseService.addSubcollectionDocument<InventoryItem>(
+      'users',
+      userId,
+      'inventoryItems',
+      documentData as Partial<InventoryItem>,
+    );
   }
 
   async updateInventoryItem(
@@ -207,22 +199,20 @@ export class InventoryService {
     itemId: string,
     updates: Partial<InventoryItem>,
   ): Promise<InventoryItem> {
-    const itemRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .doc(itemId);
-
     // Get current item to check expiration date changes
-    const currentDoc = await itemRef.get();
-    if (!currentDoc.exists) {
+    const currentItem =
+      await this.firebaseService.getSubcollectionDocument<InventoryItem>(
+        'users',
+        userId,
+        'inventoryItems',
+        itemId,
+        { throwIfNotFound: true },
+      );
+
+    if (!currentItem) {
       throw new NotFoundException('Inventory item not found');
     }
 
-    const currentItem = {
-      id: currentDoc.id,
-      ...currentDoc.data(),
-    } as InventoryItem;
     const oldExpirationDate = currentItem.expirationDate;
 
     // Convert date strings to Firestore Timestamps in updates
@@ -263,46 +253,38 @@ export class InventoryService {
       Object.entries(processedUpdates).filter(
         ([, value]) => value !== undefined,
       ),
+    ) as Partial<InventoryItem>;
+
+    return this.firebaseService.updateSubcollectionDocument<InventoryItem>(
+      'users',
+      userId,
+      'inventoryItems',
+      itemId,
+      {
+        ...updateData,
+        updatedAt: Timestamp.now(),
+      },
     );
-
-    await itemRef.update({
-      ...updateData,
-      updatedAt: Timestamp.now(),
-    });
-
-    const doc = await itemRef.get();
-    return { id: doc.id, ...doc.data() } as InventoryItem;
   }
 
   async deleteInventoryItem(userId: string, itemId: string): Promise<void> {
-    const itemRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .doc(itemId);
-
-    const doc = await itemRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Inventory item not found');
-    }
-
-    await itemRef.delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'inventoryItems',
+      itemId,
+    );
   }
 
   async searchInventoryItems(
     userId: string,
     term: string,
   ): Promise<InventoryItem[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .get();
-
-    const allItems = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as InventoryItem[];
+    const allItems = await this.firebaseService.getSubcollection<InventoryItem>(
+      'users',
+      userId,
+      'inventoryItems',
+    );
 
     const searchTerm = term.toLowerCase();
     return allItems.filter(
@@ -321,19 +303,18 @@ export class InventoryService {
     );
     const now = Timestamp.now();
 
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .where('status', '==', 'active')
-      .where('expirationDate', '>=', now)
-      .where('expirationDate', '<=', thresholdDate)
-      .orderBy('expirationDate', 'asc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as InventoryItem[];
+    return this.firebaseService.getSubcollection<InventoryItem>(
+      'users',
+      userId,
+      'inventoryItems',
+      {
+        where: [
+          { field: 'status', operator: '==', value: 'active' },
+          { field: 'expirationDate', operator: '>=', value: now },
+          { field: 'expirationDate', operator: '<=', value: thresholdDate },
+        ],
+        orderBy: { field: 'expirationDate', direction: 'asc' },
+      },
+    );
   }
 }

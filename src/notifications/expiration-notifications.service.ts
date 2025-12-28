@@ -1,8 +1,7 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { PushNotificationService } from './push-notification.service';
 import { NotificationsService } from './notifications.service';
 import { UsersService } from '../users/users.service';
@@ -23,7 +22,7 @@ export class ExpirationNotificationsService {
   private readonly alertDays = [60, 30, 10, 1]; // Days before expiration to send alerts
 
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
@@ -42,25 +41,25 @@ export class ExpirationNotificationsService {
       let totalNotificationsSent = 0;
 
       // Get all active inventory items with expiration dates
-      const allUsersSnapshot = await this.firestore.collection('users').get();
+      const allUsers = await this.firebaseService.getCollection('users');
 
-      for (const userDoc of allUsersSnapshot.docs) {
-        const userId = userDoc.id;
+      for (const user of allUsers) {
+        const userId = user.id;
 
         const isPremium = await this.usersService.isPremiumUser(userId);
 
-        const itemsSnapshot = await this.firestore
-          .collection('users')
-          .doc(userId)
-          .collection('inventoryItems')
-          .where('status', '==', 'active')
-          .where('expirationDate', '!=', null)
-          .get();
-
-        const items = itemsSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as InventoryItem[];
+        const items =
+          await this.firebaseService.getSubcollection<InventoryItem>(
+            'users',
+            userId,
+            'inventoryItems',
+            {
+              where: [
+                { field: 'status', operator: '==', value: 'active' },
+                { field: 'expirationDate', operator: '!=', value: null },
+              ],
+            },
+          );
 
         // For free users, only allow up to N active expiration notifications
         const maxFreeReminders = 10;
@@ -142,23 +141,29 @@ export class ExpirationNotificationsService {
     userId: string,
     alertDays: number,
   ): Promise<void> {
-    const itemRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .doc(itemId);
+    const item = await this.firebaseService.getSubcollectionDocument(
+      'users',
+      userId,
+      'inventoryItems',
+      itemId,
+    );
 
-    const itemDoc = await itemRef.get();
-    if (!itemDoc.exists) {
+    if (!item) {
       return;
     }
 
-    const currentSent = (itemDoc.data()?.sentNotifications as string[]) || [];
+    const currentSent = (item.sentNotifications as string[]) || [];
     const updatedSent = [...new Set([...currentSent, String(alertDays)])];
 
-    await itemRef.update({
-      sentNotifications: updatedSent,
-    });
+    await this.firebaseService.updateSubcollectionDocument(
+      'users',
+      userId,
+      'inventoryItems',
+      itemId,
+      {
+        sentNotifications: updatedSent,
+      },
+    );
   }
 
   /**

@@ -1,7 +1,6 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 export interface Notification {
   id: string;
@@ -17,71 +16,66 @@ export interface Notification {
 
 @Injectable()
 export class NotificationsService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async getNotifications(userId: string): Promise<Notification[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notifications')
-      .orderBy('createdAt', 'desc')
-      .limit(100)
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Notification[];
+    return this.firebaseService.getSubcollection<Notification>(
+      'users',
+      userId,
+      'notifications',
+      {
+        orderBy: { field: 'createdAt', direction: 'desc' },
+        limit: 100,
+      },
+    );
   }
 
   async createNotification(
     userId: string,
     notificationData: Omit<Notification, 'id' | 'userId' | 'createdAt'>,
   ): Promise<Notification> {
-    const now = Timestamp.now();
-    const docRef = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notifications')
-      .add({
+    return this.firebaseService.addSubcollectionDocument<Notification>(
+      'users',
+      userId,
+      'notifications',
+      {
         ...notificationData,
         userId,
-        createdAt: now,
-      });
-
-    const doc = await docRef.get();
-    return { id: doc.id, ...doc.data() } as Notification;
+        createdAt: Timestamp.now(),
+      },
+    );
   }
 
   async markAsRead(userId: string, notificationId: string): Promise<void> {
-    const notificationRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notifications')
-      .doc(notificationId);
-
-    const doc = await notificationRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Notification not found');
-    }
-
-    await notificationRef.update({ isRead: true });
+    await this.firebaseService.updateSubcollectionDocument(
+      'users',
+      userId,
+      'notifications',
+      notificationId,
+      { isRead: true },
+    );
   }
 
   async markAllAsRead(userId: string): Promise<void> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('notifications')
-      .where('isRead', '==', false)
-      .get();
+    const unreadNotifications = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'notifications',
+      {
+        where: [{ field: 'isRead', operator: '==', value: false }],
+      },
+    );
 
-    const batch = this.firestore.batch();
-    snapshot.docs.forEach((doc) => {
-      batch.update(doc.ref, { isRead: true });
-    });
+    const batch = this.firebaseService.createBatch();
+    for (const notification of unreadNotifications) {
+      const ref = this.firebaseService.getSubcollectionDocumentRef(
+        'users',
+        userId,
+        'notifications',
+        notification.id,
+      );
+      batch.update(ref, { isRead: true });
+    }
 
     await batch.commit();
   }

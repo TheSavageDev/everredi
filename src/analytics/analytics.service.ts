@@ -1,8 +1,9 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
+import { FIRESTORE } from '../config/firebase.provider';
+import type { firestore } from 'firebase-admin';
 
 export interface UsagePattern {
   supplyId: string;
@@ -48,22 +49,18 @@ export interface ComplianceTrend {
 @Injectable()
 export class AnalyticsService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
+    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
   ) {}
 
   async getUsagePatterns(userId: string): Promise<UsagePattern[]> {
     // Get all inventory items
-    const inventorySnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .get();
-
-    const items = inventorySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const items = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'inventoryItems',
+    );
 
     // Group by supply and calculate usage
     const supplyUsage = new Map<
@@ -159,18 +156,18 @@ export class AnalyticsService {
       now.toMillis() + daysAhead * 24 * 60 * 60 * 1000,
     );
 
-    const inventorySnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .where('status', '==', 'active')
-      .get();
+    const inventorySnapshot = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'inventoryItems',
+      {
+        where: [{ field: 'status', operator: '==', value: 'active' }],
+      },
+    );
 
     const forecasts: ExpirationForecast[] = [];
 
-    for (const doc of inventorySnapshot.docs) {
-      const item = { id: doc.id, ...doc.data() } as any;
-
+    for (const item of inventorySnapshot) {
       if (item.expirationDate && item.expirationDate <= futureDate) {
         const expirationDate = item.expirationDate as Timestamp;
         const daysUntilExpiration = Math.ceil(
@@ -197,17 +194,14 @@ export class AnalyticsService {
   }
 
   async getCostTracking(userId: string): Promise<CostTracking> {
-    const inventorySnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .where('status', '==', 'active')
-      .get();
-
-    const items = inventorySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as any[];
+    const items = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'inventoryItems',
+      {
+        where: [{ field: 'status', operator: '==', value: 'active' }],
+      },
+    );
 
     // Calculate total inventory value
     let totalInventoryValue = 0;
@@ -282,23 +276,23 @@ export class AnalyticsService {
     userId: string,
     limit: number = 10,
   ): Promise<ComplianceTrend[]> {
-    const kitsSnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .get();
+    const kits = await this.firebaseService.getSubcollection(
+      'users',
+      userId,
+      'userKits',
+    );
 
     const trends: ComplianceTrend[] = [];
 
-    for (const kitDoc of kitsSnapshot.docs) {
-      const kit = { id: kitDoc.id, ...kitDoc.data() } as any;
-
+    for (const kit of kits) {
       // Get latest compliance check for this kit
+      // Note: This is a nested subcollection (users/{userId}/userKits/{kitId}/complianceChecks)
+      // FirebaseService doesn't support nested subcollections yet, so we use direct Firestore access
       const checksSnapshot = await this.firestore
         .collection('users')
         .doc(userId)
         .collection('userKits')
-        .doc(kitDoc.id)
+        .doc(kit.id)
         .collection('complianceChecks')
         .orderBy('createdAt', 'desc')
         .limit(1)
@@ -307,7 +301,7 @@ export class AnalyticsService {
       if (!checksSnapshot.empty) {
         const check = checksSnapshot.docs[0].data() as any;
         trends.push({
-          kitId: kitDoc.id,
+          kitId: kit.id,
           kitName: kit.name || 'Unnamed Kit',
           complianceScore: check.complianceScore || 0,
           checkDate: check.createdAt || Timestamp.now(),

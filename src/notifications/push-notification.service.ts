@@ -16,24 +16,23 @@ interface DeviceToken {
 
 @Injectable()
 export class PushNotificationService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   /**
    * Get all device tokens for a user
    */
   private async getUserDeviceTokens(userId: string): Promise<DeviceToken[]> {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .get();
+      const tokens = await this.firebaseService.getSubcollection<{
+        token: string;
+        platform: string;
+        userId: string;
+        createdAt?: Timestamp;
+        updatedAt?: Timestamp;
+      }>('users', userId, 'deviceTokens');
 
-      return snapshot.docs.map((doc) => {
-        const data: DocumentData = doc.data();
-
+      return tokens.map((doc) => {
+        const data = doc as DocumentData;
         const token: string = data.token as string;
         const platform: string = data.platform as string;
         const userId: string = data.userId as string;
@@ -45,7 +44,7 @@ export class PushNotificationService {
         return {
           id: doc.id,
           token,
-          platform,
+          platform: platform as 'ios' | 'android' | 'web',
           userId,
           createdAt,
           updatedAt,
@@ -164,17 +163,25 @@ export class PushNotificationService {
     token: string,
   ): Promise<void> {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .where('token', '==', token)
-        .get();
+      const tokens = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'deviceTokens',
+        {
+          where: [{ field: 'token', operator: '==', value: token }],
+        },
+      );
 
-      const batch = this.firestore.batch();
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
+      const batch = this.firebaseService.createBatch();
+      for (const tokenDoc of tokens) {
+        const ref = this.firebaseService.getSubcollectionDocumentRef(
+          'users',
+          userId,
+          'deviceTokens',
+          tokenDoc.id,
+        );
+        batch.delete(ref);
+      }
 
       await batch.commit();
       logger.log(`Removed invalid token for user ${userId}`);

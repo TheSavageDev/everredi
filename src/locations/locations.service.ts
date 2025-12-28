@@ -1,12 +1,10 @@
 import {
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 import { UsersService } from '../users/users.service';
 
 export interface Location {
@@ -28,36 +26,33 @@ export interface Location {
 @Injectable()
 export class LocationsService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    private readonly firebaseService: FirebaseService,
     private readonly usersService: UsersService,
   ) {}
 
   async getLocations(userId: string): Promise<Location[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('locations')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Location[];
+    return this.firebaseService.getSubcollection<Location>(
+      'users',
+      userId,
+      'locations',
+    );
   }
 
   async getLocation(userId: string, locationId: string): Promise<Location> {
-    const doc = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('locations')
-      .doc(locationId)
-      .get();
+    const location =
+      await this.firebaseService.getSubcollectionDocument<Location>(
+        'users',
+        userId,
+        'locations',
+        locationId,
+        { throwIfNotFound: true },
+      );
 
-    if (!doc.exists) {
+    if (!location) {
       throw new NotFoundException('Location not found');
     }
 
-    return { id: doc.id, ...doc.data() } as Location;
+    return location;
   }
 
   async createLocation(
@@ -66,13 +61,13 @@ export class LocationsService {
   ): Promise<Location> {
     const isPremium = await this.usersService.isPremiumUser(userId);
     if (!isPremium) {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('locations')
-        .get();
+      const locations = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'locations',
+      );
 
-      const count = snapshot.size;
+      const count = locations.length;
       const maxFreeLocations = 2;
 
       if (count >= maxFreeLocations) {
@@ -84,20 +79,17 @@ export class LocationsService {
       }
     }
 
-    const now = Timestamp.now();
-    const docRef = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('locations')
-      .add({
+    return this.firebaseService.addSubcollectionDocument<Location>(
+      'users',
+      userId,
+      'locations',
+      {
         ...locationData,
         userId,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-    const doc = await docRef.get();
-    return { id: doc.id, ...doc.data() } as Location;
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async updateLocation(
@@ -105,37 +97,24 @@ export class LocationsService {
     locationId: string,
     updates: Partial<Location>,
   ): Promise<Location> {
-    const locationRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('locations')
-      .doc(locationId);
-
-    await locationRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const doc = await locationRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Location not found');
-    }
-
-    return { id: doc.id, ...doc.data() } as Location;
+    return this.firebaseService.updateSubcollectionDocument<Location>(
+      'users',
+      userId,
+      'locations',
+      locationId,
+      {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      },
+    );
   }
 
   async deleteLocation(userId: string, locationId: string): Promise<void> {
-    const locationRef = this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('locations')
-      .doc(locationId);
-
-    const doc = await locationRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Location not found');
-    }
-
-    await locationRef.delete();
+    await this.firebaseService.deleteSubcollectionDocument(
+      'users',
+      userId,
+      'locations',
+      locationId,
+    );
   }
 }

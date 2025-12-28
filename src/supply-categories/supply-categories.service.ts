@@ -1,6 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { FIRESTORE } from '../config/firebase.provider';
+import { Injectable } from '@nestjs/common';
+import { FirebaseService } from '../config/firebase.service';
 
 export interface SupplyCategory {
   id: string;
@@ -16,31 +15,22 @@ export interface SupplyCategory {
 
 @Injectable()
 export class SupplyCategoriesService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async getCategories(): Promise<SupplyCategory[]> {
-    const snapshot = await this.firestore
-      .collection('supplyCategories')
-      .where('isActive', '==', true)
-      .orderBy('sortOrder')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as SupplyCategory[];
+    return this.firebaseService.getCollection<SupplyCategory>(
+      'supplyCategories',
+      {
+        where: [{ field: 'isActive', operator: '==', value: true }],
+        orderBy: { field: 'sortOrder', direction: 'asc' },
+      },
+    );
   }
 
   async getCategory(categoryId: string): Promise<SupplyCategory | null> {
-    const doc = await this.firestore
-      .collection('supplyCategories')
-      .doc(categoryId)
-      .get();
-    if (!doc.exists) {
-      return null;
-    }
-    return { id: doc.id, ...doc.data() } as SupplyCategory;
+    return this.firebaseService.getDocument<SupplyCategory>(
+      'supplyCategories',
+      categoryId,
+    );
   }
 }

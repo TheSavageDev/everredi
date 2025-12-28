@@ -1,7 +1,6 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
+import { Injectable, Logger } from '@nestjs/common';
 import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { FirebaseService } from '../config/firebase.service';
 
 const logger = new Logger('DeviceTokensService');
 
@@ -16,9 +15,7 @@ export interface DeviceToken {
 
 @Injectable()
 export class DeviceTokensService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   /**
    * Register or update a device token for a user
@@ -30,36 +27,45 @@ export class DeviceTokensService {
   ): Promise<void> {
     try {
       // Check if token already exists for this user
-      const existingSnapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .where('token', '==', token)
-        .get();
+      const existing = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'deviceTokens',
+        {
+          where: [{ field: 'token', operator: '==', value: token }],
+          limit: 1,
+        },
+      );
 
       const now = Timestamp.now();
 
-      if (!existingSnapshot.empty) {
+      if (existing.length > 0) {
         // Update existing token
-        const doc = existingSnapshot.docs[0];
-        await doc.ref.update({
-          platform,
-          updatedAt: now,
-        });
+        await this.firebaseService.updateSubcollectionDocument(
+          'users',
+          userId,
+          'deviceTokens',
+          existing[0].id,
+          {
+            platform,
+            updatedAt: now,
+          },
+        );
         logger.log(`Updated device token for user ${userId}`);
       } else {
         // Create new token
-        await this.firestore
-          .collection('users')
-          .doc(userId)
-          .collection('deviceTokens')
-          .add({
+        await this.firebaseService.addSubcollectionDocument(
+          'users',
+          userId,
+          'deviceTokens',
+          {
             token,
             platform,
             userId,
             createdAt: now,
             updatedAt: now,
-          });
+          },
+        );
         logger.log(`Registered new device token for user ${userId}`);
       }
     } catch (error) {
@@ -73,16 +79,11 @@ export class DeviceTokensService {
    */
   async getUserDeviceTokens(userId: string): Promise<DeviceToken[]> {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .get();
-
-      return snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as DeviceToken[];
+      return this.firebaseService.getSubcollection<DeviceToken>(
+        'users',
+        userId,
+        'deviceTokens',
+      );
     } catch (error) {
       logger.error(`Error getting device tokens for user ${userId}:`, error);
       return [];
@@ -94,17 +95,25 @@ export class DeviceTokensService {
    */
   async removeDeviceToken(userId: string, token: string): Promise<void> {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .where('token', '==', token)
-        .get();
+      const tokens = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'deviceTokens',
+        {
+          where: [{ field: 'token', operator: '==', value: token }],
+        },
+      );
 
-      const batch = this.firestore.batch();
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
+      const batch = this.firebaseService.createBatch();
+      for (const tokenDoc of tokens) {
+        const ref = this.firebaseService.getSubcollectionDocumentRef(
+          'users',
+          userId,
+          'deviceTokens',
+          tokenDoc.id,
+        );
+        batch.delete(ref);
+      }
 
       await batch.commit();
       logger.log(`Removed device token for user ${userId}`);
@@ -119,16 +128,22 @@ export class DeviceTokensService {
    */
   async removeAllUserTokens(userId: string): Promise<void> {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('deviceTokens')
-        .get();
+      const tokens = await this.firebaseService.getSubcollection(
+        'users',
+        userId,
+        'deviceTokens',
+      );
 
-      const batch = this.firestore.batch();
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
+      const batch = this.firebaseService.createBatch();
+      for (const tokenDoc of tokens) {
+        const ref = this.firebaseService.getSubcollectionDocumentRef(
+          'users',
+          userId,
+          'deviceTokens',
+          tokenDoc.id,
+        );
+        batch.delete(ref);
+      }
 
       await batch.commit();
       logger.log(`Removed all device tokens for user ${userId}`);

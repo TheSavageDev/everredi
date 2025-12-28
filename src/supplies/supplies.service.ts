@@ -1,6 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { FIRESTORE } from '../config/firebase.provider';
+import { Injectable } from '@nestjs/common';
+import { FirebaseService } from '../config/firebase.service';
 
 export interface Supply {
   id: string;
@@ -27,24 +26,30 @@ export interface Supply {
 
 @Injectable()
 export class SuppliesService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  constructor(private readonly firebaseService: FirebaseService) {}
 
   async getSupplies(categoryId?: string): Promise<Supply[]> {
-    let query = this.firestore
-      .collection('supplies')
-      .where('isActive', '==', true);
+    const whereConditions: Array<{
+      field: string;
+      operator: '==';
+      value: boolean | string;
+    }> = [{ field: 'isActive', operator: '==', value: true }];
 
     if (categoryId) {
-      query = query.where('categoryId', '==', categoryId);
+      whereConditions.push({
+        field: 'categoryId',
+        operator: '==',
+        value: categoryId,
+      });
     }
 
-    const snapshot = await query.orderBy('name').get();
-    const supplies = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Supply[];
+    const supplies = await this.firebaseService.getCollection<Supply>(
+      'supplies',
+      {
+        where: whereConditions,
+        orderBy: { field: 'name', direction: 'asc' },
+      },
+    );
 
     // Sort: sponsored first (by priority desc), then by name
     return supplies.sort((a, b) => {
@@ -60,15 +65,12 @@ export class SuppliesService {
   }
 
   async searchSupplies(term: string): Promise<Supply[]> {
-    const snapshot = await this.firestore
-      .collection('supplies')
-      .where('isActive', '==', true)
-      .get();
-
-    const allSupplies = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Supply[];
+    const allSupplies = await this.firebaseService.getCollection<Supply>(
+      'supplies',
+      {
+        where: [{ field: 'isActive', operator: '==', value: true }],
+      },
+    );
 
     const searchTerm = term.toLowerCase();
     const filtered = allSupplies.filter(
@@ -92,23 +94,16 @@ export class SuppliesService {
   }
 
   async getSupply(supplyId: string): Promise<Supply | null> {
-    const doc = await this.firestore.collection('supplies').doc(supplyId).get();
-    if (!doc.exists) {
-      return null;
-    }
-    return { id: doc.id, ...doc.data() } as Supply;
+    return this.firebaseService.getDocument<Supply>('supplies', supplyId);
   }
 
   async updateSupply(
     supplyId: string,
     updates: Partial<Omit<Supply, 'id' | 'createdAt'>>,
   ): Promise<Supply> {
-    const supplyRef = this.firestore.collection('supplies').doc(supplyId);
-    await supplyRef.update({
+    return this.firebaseService.updateDocument<Supply>('supplies', supplyId, {
       ...updates,
       updatedAt: new Date(),
     });
-    const updatedDoc = await supplyRef.get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as Supply;
   }
 }

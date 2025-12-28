@@ -1,30 +1,16 @@
 import { ExpirationService } from '../expiration.service';
-import type { firestore } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
 
 describe('ExpirationService', () => {
-  const batchMock = {
-    update: jest.fn(),
-    commit: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const firestoreMock: Partial<firestore.Firestore> = {
-    collection: jest.fn().mockReturnThis() as any,
-    doc: jest.fn().mockReturnThis() as any,
-    where: jest.fn().mockReturnThis() as any,
-    orderBy: jest.fn().mockReturnThis() as any,
-    limit: jest.fn().mockReturnThis() as any,
-    get: jest.fn().mockResolvedValue({
-      docs: [],
-    }) as any,
-    batch: jest.fn(() => batchMock) as any,
-  };
+  const firebaseServiceMock = createFirebaseServiceMock();
 
   let service: ExpirationService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ExpirationService(firestoreMock as any);
+    (firebaseServiceMock._clearAll as jest.Mock)();
+    service = new ExpirationService(firebaseServiceMock as any);
   });
 
   it('returns empty list when there are no expiring items', async () => {
@@ -39,10 +25,22 @@ describe('ExpirationService', () => {
       { itemId: 'item-2', expirationDate: Timestamp.now() },
     ];
 
+    // Setup mock documents
+    (firebaseServiceMock._setMockDocument as jest.Mock)(
+      'users/user-1/inventoryItems/item-1',
+      { id: 'item-1', status: 'active' },
+    );
+    (firebaseServiceMock._setMockDocument as jest.Mock)(
+      'users/user-1/inventoryItems/item-2',
+      { id: 'item-2', status: 'active' },
+    );
+
     await service.bulkUpdateExpirationDates('user-1', updates);
 
-    expect(firestoreMock.batch).toHaveBeenCalled();
-    expect(batchMock.update).toHaveBeenCalledTimes(updates.length);
-    expect(batchMock.commit).toHaveBeenCalledTimes(1);
+    expect(firebaseServiceMock.createBatch).toHaveBeenCalled();
+    const batch = (firebaseServiceMock.createBatch as jest.Mock).mock.results[0]
+      .value;
+    expect(batch.update).toHaveBeenCalledTimes(updates.length);
+    expect(batch.commit).toHaveBeenCalledTimes(1);
   });
 });

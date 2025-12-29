@@ -207,7 +207,14 @@ export class PublicTemplatesService {
       .get();
 
     return itemsSnapshot.docs.map((doc) => {
-      const data = doc.data();
+      const data = doc.data() as {
+        supplyId: string;
+        supplyName?: string;
+        quantity: number;
+        scalesWithPeople?: boolean;
+        peopleCountQuantities?: Record<number, number>;
+        notes?: string;
+      };
       const quantity = this.calculateItemQuantity(
         data,
         peopleCount,

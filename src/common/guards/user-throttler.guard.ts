@@ -24,7 +24,7 @@ interface RequestWithUser {
 
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
-  protected getTracker(req: RequestWithUser): string {
+  protected async getTracker(req: RequestWithUser): Promise<string> {
     // Use user UID if available (from Firebase Auth or API Key)
     if (req.user?.uid) {
       return `user:${req.user.uid}`;
@@ -51,10 +51,10 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     return `${name}:${suffix}`;
   }
 
-  protected throwThrottlingException(
+  protected async throwThrottlingException(
     context: ExecutionContext,
     throttlerLimitDetail: ThrottlerLimitDetail,
-  ): void {
+  ): Promise<void> {
     interface ResponseWithHeaders {
       setHeader: (name: string, value: string | number) => void;
       [key: string]: unknown;

@@ -152,10 +152,9 @@ export class FirebaseApp {
       return getFirestore(this.app);
     }
 
-    // For named Firestore databases, use the app.firestore(databaseId) method
-    // Type assertion needed: Firebase Admin SDK supports named databases but types are incomplete
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return
-    return (this.app as any).firestore(dbId);
+    // For named Firestore databases, use getFirestore with the databaseId parameter
+    // This is the correct way to access named databases in Firebase Admin SDK
+    return getFirestore(this.app, dbId);
   }
 
   remoteConfig(): RemoteConfig {

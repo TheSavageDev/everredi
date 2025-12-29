@@ -5,7 +5,7 @@ import { TEST_AUTH_HEADER } from '../utils/test-auth';
 
 describe('Admin Endpoints E2E', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
     context = await createTestingApp();
@@ -39,12 +39,14 @@ describe('Admin Endpoints E2E', () => {
 
     it('should reject non-admin user from public kit template endpoints', async () => {
       const res = await request(server)
-        .post('/api/kits/public-templates')
+        .post('/api/public-templates')
         .set(TEST_AUTH_HEADER)
         .send({
           name: 'Test Template',
           description: 'Test',
-          category: 'test',
+          purpose: 'test',
+          groupSize: 1,
+          skillLevel: 'beginner',
         });
 
       expect(res.status).toBe(403);

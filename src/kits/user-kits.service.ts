@@ -238,8 +238,8 @@ export class UserKitsService {
         };
 
         // Only include notes if it's defined
-        if (item.notes) {
-          itemInstanceData.notes = item.notes;
+        if ((item as { notes?: string }).notes) {
+          itemInstanceData.notes = (item as { notes?: string }).notes;
         }
 
         batch.set(itemInstanceRef, itemInstanceData);
@@ -259,8 +259,8 @@ export class UserKitsService {
             };
 
             // Only include notes if it's defined and not empty
-            if (item.notes) {
-              inventoryItemData.notes = item.notes;
+            if ((item as { notes?: string }).notes) {
+              inventoryItemData.notes = (item as { notes?: string }).notes;
             }
 
             await this.inventoryService.createInventoryItem(

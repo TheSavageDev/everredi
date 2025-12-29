@@ -5,6 +5,7 @@ import {
 import { Timestamp } from 'firebase-admin/firestore';
 import { NotFoundException } from '@nestjs/common';
 import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
+import { FirebaseService } from '../../config/firebase.service';
 
 describe('CustomFieldsService', () => {
   const firebaseServiceMock = createFirebaseServiceMock();

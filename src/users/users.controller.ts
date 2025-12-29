@@ -18,7 +18,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
-  async getCurrentUser(@CurrentUser() user: any) {
+  async getCurrentUser(@CurrentUser() user: { uid: string }) {
     const userData = await this.usersService.getUserById(user.uid);
     return {
       success: true,
@@ -29,7 +29,10 @@ export class UsersController {
   }
 
   @Put('me')
-  async updateCurrentUser(@CurrentUser() user: any, @Body() updates: any) {
+  async updateCurrentUser(
+    @CurrentUser() user: { uid: string },
+    @Body() updates: Partial<{ displayName?: string; avatarUrl?: string }>,
+  ) {
     const userData = await this.usersService.updateUser(user.uid, updates);
     return {
       success: true,
@@ -40,7 +43,7 @@ export class UsersController {
   }
 
   @Get('me/subscription')
-  async getSubscriptionStatus(@CurrentUser() user: any) {
+  async getSubscriptionStatus(@CurrentUser() user: { uid: string }) {
     const status = await this.usersService.getSubscriptionStatus(user.uid);
     return {
       success: true,
@@ -52,7 +55,7 @@ export class UsersController {
 
   @Post('me/referral/apply')
   async applyReferralCode(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() body: { referralCode: string },
   ) {
     const result = await this.usersService.applyReferralCode(
@@ -67,7 +70,7 @@ export class UsersController {
   }
 
   @Get('me/referral/stats')
-  async getReferralStats(@CurrentUser() user: any) {
+  async getReferralStats(@CurrentUser() user: { uid: string }) {
     const stats = await this.usersService.getReferralStats(user.uid);
     return {
       success: true,

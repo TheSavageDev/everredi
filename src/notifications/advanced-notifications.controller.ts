@@ -10,8 +10,13 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { AdvancedNotificationsService } from './advanced-notifications.service';
+import {
+  AdvancedNotificationsService,
+  AlertThreshold,
+  LowStockAlert,
+} from './advanced-notifications.service';
 
 @Controller('notifications')
 @UseGuards(FirebaseAuthGuard, PremiumGuard)
@@ -21,6 +26,7 @@ export class AdvancedNotificationsController {
   ) {}
 
   @Get('preferences')
+  @Premium()
   async getPreferences(@CurrentUser('uid') userId: string) {
     const preferences =
       await this.advancedNotificationsService.getNotificationPreferences(
@@ -37,7 +43,7 @@ export class AdvancedNotificationsController {
   @Patch('preferences')
   async updatePreferences(
     @CurrentUser('uid') userId: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     const preferences =
       await this.advancedNotificationsService.updateNotificationPreferences(
@@ -67,12 +73,15 @@ export class AdvancedNotificationsController {
   @Post('alert-thresholds')
   async createAlertThreshold(
     @CurrentUser('uid') userId: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     const threshold =
       await this.advancedNotificationsService.createAlertThreshold(
         userId,
-        body,
+        body as Omit<
+          AlertThreshold,
+          'id' | 'userId' | 'createdAt' | 'updatedAt'
+        >,
       );
     return {
       success: true,
@@ -86,7 +95,7 @@ export class AdvancedNotificationsController {
   async updateAlertThreshold(
     @CurrentUser('uid') userId: string,
     @Param('id') thresholdId: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     const threshold =
       await this.advancedNotificationsService.updateAlertThreshold(
@@ -133,11 +142,11 @@ export class AdvancedNotificationsController {
   @Post('low-stock-alerts')
   async createLowStockAlert(
     @CurrentUser('uid') userId: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     const alert = await this.advancedNotificationsService.createLowStockAlert(
       userId,
-      body,
+      body as Omit<LowStockAlert, 'id' | 'userId' | 'createdAt' | 'updatedAt'>,
     );
     return {
       success: true,
@@ -151,7 +160,7 @@ export class AdvancedNotificationsController {
   async updateLowStockAlert(
     @CurrentUser('uid') userId: string,
     @Param('id') alertId: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     const alert = await this.advancedNotificationsService.updateLowStockAlert(
       userId,

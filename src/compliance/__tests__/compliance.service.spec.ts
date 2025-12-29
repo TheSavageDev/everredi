@@ -1,30 +1,39 @@
 import { ComplianceService } from '../compliance.service';
 import type { firestore } from 'firebase-admin';
+import { UsersService } from '../../users/users.service';
 
 describe('ComplianceService', () => {
-  const firestoreMock: Partial<firestore.Firestore> = {
-    collection: jest.fn().mockReturnThis() as any,
-    doc: jest.fn().mockReturnThis() as any,
-    where: jest.fn().mockReturnThis() as any,
-    orderBy: jest.fn().mockReturnThis() as any,
-    limit: jest.fn().mockReturnThis() as any,
-    get: jest.fn().mockResolvedValue({
-      docs: [],
-    }) as any,
-    add: jest.fn().mockResolvedValue({
-      id: 'check-1',
-      get: jest.fn().mockResolvedValue({
-        id: 'check-1',
-        data: () => ({}),
+  const firestoreMock = {
+    collection: jest.fn().mockReturnValue({
+      doc: jest.fn().mockReturnValue({
+        collection: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          get: jest.fn().mockResolvedValue({
+            docs: [],
+          }),
+          add: jest.fn().mockResolvedValue({
+            id: 'check-1',
+            get: jest.fn().mockResolvedValue({
+              id: 'check-1',
+              data: () => ({}),
+            }),
+          }),
+        }),
       }),
-    }) as any,
-  };
+    }),
+  } as unknown as firestore.Firestore;
+
+  const usersServiceMock = {
+    getUserById: jest.fn(),
+  } as unknown as UsersService;
 
   let service: ComplianceService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ComplianceService(firestoreMock as any);
+    service = new ComplianceService(firestoreMock, usersServiceMock);
   });
 
   it('returns an empty list of compliance checks for a new user', async () => {

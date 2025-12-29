@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TeamsService } from './teams.service';
 
@@ -19,6 +20,7 @@ export class TeamsController {
   constructor(private readonly teamsService: TeamsService) {}
 
   @Post()
+  @Premium()
   async createTeam(
     @CurrentUser('uid') userId: string,
     @Body() body: { name: string; description?: string },

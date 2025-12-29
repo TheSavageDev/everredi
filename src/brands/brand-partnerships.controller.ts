@@ -11,7 +11,10 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
-import { BrandPartnershipsService } from './brand-partnerships.service';
+import {
+  BrandPartnershipsService,
+  BrandPartnership,
+} from './brand-partnerships.service';
 
 @Controller('brand-partnerships')
 export class BrandPartnershipsController {
@@ -125,14 +128,18 @@ export class BrandPartnershipsController {
     }>,
   ) {
     const { Timestamp } = await import('firebase-admin/firestore');
-    const updates: any = { ...body };
+    const updates: Partial<
+      Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>
+    > = {
+      ...body,
+    } as Partial<Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>>;
     if (body.startDate) {
       updates.startDate = Timestamp.fromDate(new Date(body.startDate));
     }
     if (body.endDate !== undefined) {
       updates.endDate = body.endDate
         ? Timestamp.fromDate(new Date(body.endDate))
-        : null;
+        : undefined;
     }
 
     const partnership = await this.brandPartnershipsService.updatePartnership(

@@ -95,17 +95,20 @@ export class UsersService {
               updatedAt: now,
             });
           }
-        } catch (locationError) {
+        } catch (locationError: unknown) {
           // Log but don't fail user creation if location creation fails
+          const errorMessage =
+            locationError instanceof Error
+              ? locationError.message
+              : String(locationError);
           this.logger.warn(
-            `Failed to create default location for user ${firebaseUid}:`,
-            locationError,
+            `Failed to create default location for user ${firebaseUid}: ${errorMessage}`,
           );
         }
       } else {
         // Update existing user - filter out undefined values
         const updateData = Object.fromEntries(
-          Object.entries(userData).filter(([_, value]) => value !== undefined),
+          Object.entries(userData).filter(([, value]) => value !== undefined),
         );
         await userRef.update(updateData);
       }
@@ -160,9 +163,10 @@ export class UsersService {
         displayName:
           userData?.displayName || userRecord.displayName || undefined,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If user not found, return null
-      if (error.code === 'auth/user-not-found') {
+      const errorObj = error as { code?: string };
+      if (errorObj.code === 'auth/user-not-found') {
         return null;
       }
       // Re-throw other errors
@@ -177,7 +181,7 @@ export class UsersService {
       Object.entries({
         ...updates,
         updatedAt: Timestamp.now(),
-      }).filter(([_, value]) => value !== undefined),
+      }).filter(([, value]) => value !== undefined),
     );
     await userRef.update(updateData);
     const updatedDoc = await userRef.get();

@@ -5,7 +5,7 @@ import { TEST_AUTH_HEADER } from '../utils/test-auth';
 
 describe('Inventory E2E', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
     context = await createTestingApp();

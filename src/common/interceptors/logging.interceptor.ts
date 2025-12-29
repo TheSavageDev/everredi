@@ -11,7 +11,7 @@ import * as Sentry from '@sentry/node';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<Request>();
     const { method, url, ip } = request;
     const startTime = Date.now();
@@ -31,7 +31,12 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         const duration = Date.now() - startTime;
-        const { statusCode } = context.switchToHttp().getResponse();
+        interface ResponseWithStatusCode {
+          statusCode?: number;
+          [key: string]: unknown;
+        }
+        const response = context.switchToHttp().getResponse();
+        const statusCode = response.statusCode;
 
         // Add breadcrumb for response
         Sentry.addBreadcrumb({
@@ -60,8 +65,10 @@ export class LoggingInterceptor implements NestInterceptor {
           );
         }
       }),
-      catchError((error) => {
+      catchError((error: unknown) => {
         const duration = Date.now() - startTime;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
 
         // Add breadcrumb for error
         Sentry.addBreadcrumb({
@@ -72,7 +79,7 @@ export class LoggingInterceptor implements NestInterceptor {
             method,
             url,
             duration,
-            error: error.message,
+            error: errorMessage,
           },
         });
 

@@ -147,7 +147,7 @@ Return ONLY the JSON array, no other text.`;
         throw new Error('Failed to parse AI response');
       }
 
-      const recommendedItems = JSON.parse(jsonMatch[0]);
+      const recommendedItems: unknown = JSON.parse(jsonMatch[0]);
 
       // Save recommendation
       const now = Timestamp.now();
@@ -170,16 +170,24 @@ Return ONLY the JSON array, no other text.`;
 
       const doc = await docRef.get();
       return { id: doc.id, ...doc.data() } as AiRecommendation;
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error(
         'AI recommendation error:',
         error instanceof Error ? error.stack : String(error),
       );
 
+      interface GeminiError {
+        errorDetails?: Array<{ reason?: string }>;
+        status?: number;
+        message?: string;
+      }
+
+      const geminiError = error as GeminiError;
+
       // Provide more specific error messages
       if (
-        error?.errorDetails?.some(
-          (detail: any) => detail.reason === 'API_KEY_INVALID',
+        geminiError.errorDetails?.some(
+          (detail) => detail.reason === 'API_KEY_INVALID',
         )
       ) {
         throw new Error(
@@ -188,18 +196,18 @@ Return ONLY the JSON array, no other text.`;
         );
       }
 
-      if (error?.status === 400) {
+      if (geminiError.status === 400) {
         throw new Error(
-          `Gemini API error: ${error.message || 'Bad request. Please check your API key and request format.'}`,
+          `Gemini API error: ${geminiError.message || 'Bad request. Please check your API key and request format.'}`,
         );
       }
 
-      if (error?.status === 404) {
+      if (geminiError.status === 404) {
         const modelName =
           this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.0-pro';
         throw new Error(
           `Gemini model "${modelName}" not found for API version v1beta.\n` +
-            `Error: ${error.message || 'Model not available'}\n` +
+            `Error: ${geminiError.message || 'Model not available'}\n` +
             `Try setting GEMINI_MODEL environment variable to a supported model.\n` +
             `Common models: gemini-1.0-pro, gemini-1.0-flash\n` +
             `List available models: https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_API_KEY`,
@@ -207,7 +215,7 @@ Return ONLY the JSON array, no other text.`;
       }
 
       throw new Error(
-        `Failed to generate AI recommendation: ${error.message || 'Unknown error'}`,
+        `Failed to generate AI recommendation: ${geminiError.message || 'Unknown error'}`,
       );
     }
   }

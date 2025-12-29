@@ -9,27 +9,31 @@ describe('AiService (integration)', () => {
   let moduleRef: TestingModule;
   let service: AiService;
 
-  const firestoreMock: Partial<firestore.Firestore> = {
-    collection: jest.fn().mockReturnThis() as any,
-    doc: jest.fn().mockReturnThis() as any,
-    where: jest.fn().mockReturnThis() as any,
-    orderBy: jest.fn().mockReturnThis() as any,
-    limit: jest.fn().mockReturnThis() as any,
-    get: jest.fn().mockResolvedValue({
-      size: 0,
-      docs: [],
-    }) as any,
-    add: jest.fn().mockResolvedValue({
-      id: 'rec-1',
-      get: jest.fn().mockResolvedValue({
-        id: 'rec-1',
-        data: () => ({
-          userId: 'user-1',
-          recommendedItems: [],
+  const firestoreMock = {
+    collection: jest.fn().mockReturnValue({
+      doc: jest.fn().mockReturnValue({
+        collection: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          get: jest.fn().mockResolvedValue({
+            size: 0,
+            docs: [],
+          }),
+          add: jest.fn().mockResolvedValue({
+            id: 'rec-1',
+            get: jest.fn().mockResolvedValue({
+              id: 'rec-1',
+              data: () => ({
+                userId: 'user-1',
+                recommendedItems: [],
+              }),
+            }),
+          }),
         }),
       }),
-    }) as any,
-  };
+    }),
+  } as unknown as firestore.Firestore;
 
   const usersServiceMock: Partial<UsersService> = {
     getUserById: jest.fn().mockResolvedValue({
@@ -38,8 +42,8 @@ describe('AiService (integration)', () => {
       email: 'test@example.com',
       subscriptionTier: 'free',
       subscriptionStatus: 'active',
-      createdAt: {} as any,
-      updatedAt: {} as any,
+      createdAt: {} as firestore.Timestamp,
+      updatedAt: {} as firestore.Timestamp,
       isActive: true,
     }),
   };

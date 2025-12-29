@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { LocationsService } from './locations.service';
+import { LocationsService, Location } from './locations.service';
 
 @Controller('locations')
 @UseGuards(FirebaseAuthGuard)
@@ -18,7 +18,7 @@ export class LocationsController {
   constructor(private readonly locationsService: LocationsService) {}
 
   @Get()
-  async getLocations(@CurrentUser() user: any) {
+  async getLocations(@CurrentUser() user: { uid: string }) {
     const locations = await this.locationsService.getLocations(user.uid);
     return {
       success: true,
@@ -29,10 +29,23 @@ export class LocationsController {
   }
 
   @Post()
-  async createLocation(@CurrentUser() user: any, @Body() locationData: any) {
+  async createLocation(
+    @CurrentUser() user: { uid: string },
+    @Body()
+    locationData: Partial<{
+      name: string;
+      description?: string;
+      locationType?: string;
+      address?: string;
+      coordinates?: { latitude: number; longitude: number };
+    }>,
+  ) {
     const location = await this.locationsService.createLocation(
       user.uid,
-      locationData,
+      locationData as Omit<
+        Location,
+        'id' | 'updatedAt' | 'createdAt' | 'userId'
+      >,
     );
     return {
       success: true,
@@ -44,14 +57,21 @@ export class LocationsController {
 
   @Put(':id')
   async updateLocation(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
-    @Body() updates: any,
+    @Body()
+    updates: Partial<{
+      name?: string;
+      description?: string;
+      locationType?: string;
+      address?: string;
+      coordinates?: { latitude: number; longitude: number };
+    }>,
   ) {
     const location = await this.locationsService.updateLocation(
       user.uid,
       id,
-      updates,
+      updates as Partial<Location>,
     );
     return {
       success: true,
@@ -62,7 +82,10 @@ export class LocationsController {
   }
 
   @Delete(':id')
-  async deleteLocation(@CurrentUser() user: any, @Param('id') id: string) {
+  async deleteLocation(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     await this.locationsService.deleteLocation(user.uid, id);
     return {
       success: true,

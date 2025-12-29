@@ -1,6 +1,7 @@
 import { ExpirationService } from '../expiration.service';
 import { Timestamp } from 'firebase-admin/firestore';
 import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
+import { FirebaseService } from '../../config/firebase.service';
 
 describe('ExpirationService', () => {
   const firebaseServiceMock = createFirebaseServiceMock();
@@ -10,7 +11,9 @@ describe('ExpirationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (firebaseServiceMock._clearAll as jest.Mock)();
-    service = new ExpirationService(firebaseServiceMock as any);
+    service = new ExpirationService(
+      firebaseServiceMock as unknown as FirebaseService,
+    );
   });
 
   it('returns empty list when there are no expiring items', async () => {

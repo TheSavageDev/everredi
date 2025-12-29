@@ -1,5 +1,7 @@
 import { NotificationsService } from '../notifications.service';
 import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
+import { Timestamp } from 'firebase-admin/firestore';
+import { FirebaseService } from '../../config/firebase.service';
 
 describe('NotificationsService', () => {
   const firebaseServiceMock = createFirebaseServiceMock();
@@ -9,7 +11,9 @@ describe('NotificationsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (firebaseServiceMock._clearAll as jest.Mock)();
-    service = new NotificationsService(firebaseServiceMock as any);
+    service = new NotificationsService(
+      firebaseServiceMock as unknown as FirebaseService,
+    );
   });
 
   it('retrieves notifications for a user', async () => {
@@ -24,7 +28,7 @@ describe('NotificationsService', () => {
           title: 'Test',
           message: 'Test message',
           isRead: false,
-          createdAt: {} as any,
+          createdAt: Timestamp.now(),
         },
       ],
     );

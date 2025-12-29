@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SharingService } from './sharing.service';
 
@@ -19,6 +20,7 @@ export class SharingController {
   constructor(private readonly sharingService: SharingService) {}
 
   @Post('kits/:kitId/share')
+  @Premium()
   async shareKit(
     @CurrentUser('uid') userId: string,
     @Param('kitId') kitId: string,

@@ -15,8 +15,19 @@ export class SentryExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    interface RequestWithUser extends Request {
+      user?: {
+        uid?: string;
+        id?: string;
+        email?: string;
+        name?: string;
+        displayName?: string;
+        [key: string]: unknown;
+      };
+    }
+
     // Extract user context from request if available
-    const user = (request as any).user;
+    const user = (request as RequestWithUser).user;
     if (user) {
       Sentry.setUser({
         id: user.uid || user.id,
@@ -40,14 +51,32 @@ export class SentryExceptionFilter implements ExceptionFilter {
     // Determine status code and message
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      message =
-        typeof exceptionResponse === 'string'
-          ? exceptionResponse
-          : (exceptionResponse as any).message || exception.message;
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
+        const responseObj = exceptionResponse as {
+          message?: unknown;
+          code?: unknown;
+        };
+        message =
+          responseObj.message !== undefined
+            ? String(responseObj.message)
+            : exception.message;
+        code =
+          responseObj.code !== undefined
+            ? String(responseObj.code)
+            : undefined;
+      } else {
+        message = exception.message;
+      }
     } else if (exception instanceof Error) {
       message = exception.message;
     }
@@ -76,21 +105,34 @@ export class SentryExceptionFilter implements ExceptionFilter {
     }
 
     // Send response
-    response.status(status).json({
+    const responseBody: {
+      success: false;
+      message: string;
+      statusCode: number;
+      timestamp: string;
+      path: string;
+      code?: string;
+    } = {
       success: false,
       message,
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
-    });
+    };
+
+    if (code) {
+      responseBody.code = code;
+    }
+
+    response.status(status).json(responseBody);
   }
 
-  private sanitizeBody(body: any): any {
-    if (!body || typeof body !== 'object') {
+  private sanitizeBody(body: unknown): unknown {
+    if (!body || typeof body !== 'object' || body === null) {
       return body;
     }
 
-    const sanitized = { ...body };
+    const sanitized = { ...body } as Record<string, unknown>;
     const sensitiveFields = [
       'password',
       'token',
@@ -100,7 +142,7 @@ export class SentryExceptionFilter implements ExceptionFilter {
     ];
 
     sensitiveFields.forEach((field) => {
-      if (sanitized[field]) {
+      if (field in sanitized) {
         sanitized[field] = '[Filtered]';
       }
     });

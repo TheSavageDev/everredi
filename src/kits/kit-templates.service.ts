@@ -38,7 +38,7 @@ export class KitTemplatesService {
 
     return snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as unknown as Omit<KitTemplate, 'id'>),
     })) as KitTemplate[];
   }
 
@@ -57,7 +57,10 @@ export class KitTemplatesService {
       throw new NotFoundException('Kit template not found');
     }
 
-    return { id: doc.id, ...doc.data() } as KitTemplate;
+    return {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<KitTemplate, 'id'>),
+    } as KitTemplate;
   }
 
   async createKitTemplate(
@@ -83,7 +86,10 @@ export class KitTemplatesService {
       .add(templateDataWithDefaults);
 
     const doc = await docRef.get();
-    const template = { id: doc.id, ...doc.data() } as KitTemplate;
+    const template = {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<KitTemplate, 'id'>),
+    } as KitTemplate;
 
     // If template is created as public, sync to public collection
     if (templateData.isPublic) {
@@ -120,7 +126,7 @@ export class KitTemplatesService {
       throw new NotFoundException('Kit template not found');
     }
 
-    const existingData = existingDoc.data() as KitTemplate;
+    const existingData = existingDoc.data() as unknown as KitTemplate;
     const wasPublic = existingData.isPublic;
     const isNowPublic = updates.isPublic === true;
 
@@ -219,7 +225,10 @@ export class KitTemplatesService {
     }
 
     const doc = await templateRef.get();
-    return { id: doc.id, ...doc.data() } as KitTemplate;
+    return {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<KitTemplate, 'id'>),
+    } as KitTemplate;
   }
 
   async deleteKitTemplate(userId: string, templateId: string): Promise<void> {
@@ -241,7 +250,11 @@ export class KitTemplatesService {
    * Calculate item quantity based on people count
    */
   private calculateItemQuantity(
-    item: any,
+    item: {
+      quantity: number;
+      scalesWithPeople?: boolean;
+      peopleCountQuantities?: Record<number, number>;
+    },
     selectedPeopleCount: number,
     defaultPeopleCount: number,
   ): number {
@@ -286,7 +299,7 @@ export class KitTemplatesService {
       throw new NotFoundException('Kit template not found');
     }
 
-    const template = templateDoc.data() as KitTemplate;
+    const template = templateDoc.data() as unknown as KitTemplate;
     const defaultPeopleCount = template.defaultPeopleCount ?? 1;
     const peopleCount = selectedPeopleCount ?? defaultPeopleCount;
 
@@ -296,7 +309,14 @@ export class KitTemplatesService {
       .get();
 
     return itemsSnapshot.docs.map((doc) => {
-      const data = doc.data();
+      const data = doc.data() as unknown as {
+        supplyId: string;
+        supplyName?: string;
+        quantity: number;
+        notes?: string;
+        scalesWithPeople?: boolean;
+        peopleCountQuantities?: Record<number, number>;
+      };
       const quantity = this.calculateItemQuantity(
         data,
         peopleCount,

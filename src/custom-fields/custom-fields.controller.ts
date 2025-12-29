@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   CustomFieldsService,
@@ -22,6 +23,7 @@ export class CustomFieldsController {
   constructor(private readonly customFieldsService: CustomFieldsService) {}
 
   @Get()
+  @Premium()
   async getCustomFields(@CurrentUser('uid') userId: string) {
     const fields = await this.customFieldsService.getCustomFields(userId);
     return {
@@ -33,6 +35,7 @@ export class CustomFieldsController {
   }
 
   @Post()
+  @Premium()
   async createCustomField(
     @CurrentUser('uid') userId: string,
     @Body()

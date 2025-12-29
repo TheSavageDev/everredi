@@ -5,7 +5,7 @@ import { TEST_AUTH_HEADER } from '../utils/test-auth';
 
 describe('Premium Feature Gates E2E', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
     context = await createTestingApp();
@@ -28,9 +28,8 @@ describe('Premium Feature Gates E2E', () => {
 
     it('should reject free user from bulk operations endpoint', async () => {
       const res = await request(server)
-        .post('/api/bulk/export')
-        .set(TEST_AUTH_HEADER)
-        .send({ type: 'inventory' });
+        .get('/api/bulk/export/inventory')
+        .set(TEST_AUTH_HEADER);
 
       expect(res.status).toBe(403);
       expect(res.body).toHaveProperty('code', 'PREMIUM_REQUIRED');
@@ -85,7 +84,7 @@ describe('Premium Feature Gates E2E', () => {
 
     it('should reject free user from advanced notifications endpoint', async () => {
       const res = await request(server)
-        .get('/api/notifications/advanced/preferences')
+        .get('/api/notifications/preferences')
         .set(TEST_AUTH_HEADER);
 
       expect(res.status).toBe(403);

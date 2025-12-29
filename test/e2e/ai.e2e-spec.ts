@@ -5,10 +5,11 @@ import { TEST_AUTH_HEADER } from '../utils/test-auth';
 
 describe('AI E2E', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
-    context = await createTestingApp();
+    // Create test app with premium status enabled for AI tests
+    context = await createTestingApp({ isPremium: true });
     server = context.app.getHttpServer();
   });
 
@@ -24,6 +25,8 @@ describe('AI E2E', () => {
         prompt: 'Basic first aid kit',
         purpose: 'home',
         groupSize: 4,
+        environment: 'home',
+        skillLevel: 'beginner',
       });
 
     expect(res.status).toBe(201);

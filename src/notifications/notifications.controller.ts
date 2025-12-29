@@ -21,7 +21,7 @@ export class NotificationsController {
   ) {}
 
   @Get()
-  async getNotifications(@CurrentUser() user: any) {
+  async getNotifications(@CurrentUser() user: { uid: string }) {
     const notifications = await this.notificationsService.getNotifications(
       user.uid,
     );
@@ -34,7 +34,10 @@ export class NotificationsController {
   }
 
   @Put(':id/read')
-  async markAsRead(@CurrentUser() user: any, @Param('id') id: string) {
+  async markAsRead(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     await this.notificationsService.markAsRead(user.uid, id);
     return {
       success: true,
@@ -44,7 +47,7 @@ export class NotificationsController {
   }
 
   @Put('read-all')
-  async markAllAsRead(@CurrentUser() user: any) {
+  async markAllAsRead(@CurrentUser() user: { uid: string }) {
     await this.notificationsService.markAllAsRead(user.uid);
     return {
       success: true,
@@ -55,7 +58,7 @@ export class NotificationsController {
 
   @Post('register-device')
   async registerDevice(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() body: { token: string; platform?: 'ios' | 'android' | 'web' },
   ) {
     const platform = body.platform || 'ios'; // Default to iOS, should be detected from client
@@ -71,27 +74,13 @@ export class NotificationsController {
     };
   }
 
-  @Get('preferences')
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getPreferences(@CurrentUser() _user: any) {
-    // TODO: Implement preferences storage in Firestore
-    // For now, return defaults
-    return {
-      success: true,
-      data: {
-        expirationAlerts: true,
-        expirationAlertDays: [60, 30, 10, 1],
-        oshaComplianceAlerts: true,
-        kitReminders: false,
-      },
-      timestamp: new Date().toISOString(),
-    };
-  }
+  // Preferences endpoint moved to AdvancedNotificationsController (premium feature)
+  // This route is removed to avoid conflict with the premium version
 
   @Put('preferences')
-  async updatePreferences(
+  updatePreferences(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    @CurrentUser() _user: any,
+    @CurrentUser() _user: { uid: string },
     @Body()
     _preferences: {
       expirationAlerts?: boolean;

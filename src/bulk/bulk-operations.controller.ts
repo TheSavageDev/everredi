@@ -3,6 +3,7 @@ import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { BulkOperationsService } from './bulk-operations.service';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 
 @Controller('bulk')
 @UseGuards(FirebaseAuthGuard, PremiumGuard)
@@ -12,13 +13,14 @@ export class BulkOperationsController {
   @Post('import/inventory')
   async importInventory(
     @CurrentUser('uid') userId: string,
-    @Body() body: { data: any[] | string },
+    @Body() body: { data: unknown[] | string },
   ) {
-    let jsonData: any[];
+    let jsonData: unknown[];
 
     if (Array.isArray(body.data)) {
       jsonData = body.data;
     } else if (typeof body.data === 'string') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       jsonData = JSON.parse(body.data);
     } else {
       throw new Error('No data provided');
@@ -37,6 +39,7 @@ export class BulkOperationsController {
   }
 
   @Get('export/inventory')
+  @Premium()
   async exportInventory(@CurrentUser('uid') userId: string) {
     const data = await this.bulkOperationsService.exportInventory(userId);
     return {
@@ -61,7 +64,7 @@ export class BulkOperationsController {
   @Post('update/inventory')
   async bulkUpdateInventory(
     @CurrentUser('uid') userId: string,
-    @Body() body: { itemIds: string[]; updates: any },
+    @Body() body: { itemIds: string[]; updates: Record<string, unknown> },
   ) {
     const result = await this.bulkOperationsService.bulkUpdateInventory(
       userId,

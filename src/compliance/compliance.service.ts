@@ -97,7 +97,13 @@ export class ComplianceService {
       .collection('kitItems')
       .get();
 
-    const kitItems = kitItemsSnapshot.docs.map((doc) => doc.data());
+    const kitItems = kitItemsSnapshot.docs.map(
+      (doc) =>
+        doc.data() as unknown as {
+          supplyId: string;
+          actualQuantity: number;
+        },
+    );
 
     // Get compliance rule
     let rule: OshaComplianceRule | null = null;
@@ -107,7 +113,10 @@ export class ComplianceService {
         .doc(oshaRuleId)
         .get();
       if (ruleDoc.exists) {
-        rule = { id: ruleDoc.id, ...ruleDoc.data() } as OshaComplianceRule;
+        rule = {
+          id: ruleDoc.id,
+          ...(ruleDoc.data() as unknown as Omit<OshaComplianceRule, 'id'>),
+        } as OshaComplianceRule;
       }
     } else if (industry) {
       const rulesSnapshot = await this.firestore
@@ -119,7 +128,10 @@ export class ComplianceService {
 
       if (!rulesSnapshot.empty) {
         const ruleDoc = rulesSnapshot.docs[0];
-        rule = { id: ruleDoc.id, ...ruleDoc.data() } as OshaComplianceRule;
+        rule = {
+          id: ruleDoc.id,
+          ...(ruleDoc.data() as unknown as Omit<OshaComplianceRule, 'id'>),
+        } as OshaComplianceRule;
       }
     }
 
@@ -187,7 +199,10 @@ export class ComplianceService {
       });
 
     const checkDoc = await checkRef.get();
-    return { id: checkDoc.id, ...checkDoc.data() } as ComplianceCheck;
+    return {
+      id: checkDoc.id,
+      ...(checkDoc.data() as unknown as Omit<ComplianceCheck, 'id'>),
+    } as ComplianceCheck;
   }
 
   async getComplianceChecks(userId: string): Promise<ComplianceCheck[]> {
@@ -209,7 +224,7 @@ export class ComplianceService {
       checks.push(
         ...(checksSnapshot.docs.map((doc) => ({
           id: doc.id,
-          ...doc.data(),
+          ...(doc.data() as unknown as Omit<ComplianceCheck, 'id'>),
         })) as ComplianceCheck[]),
       );
     }
@@ -237,7 +252,10 @@ export class ComplianceService {
         .get();
 
       if (checkDoc.exists) {
-        return { id: checkDoc.id, ...checkDoc.data() } as ComplianceCheck;
+        return {
+          id: checkDoc.id,
+          ...(checkDoc.data() as unknown as Omit<ComplianceCheck, 'id'>),
+        } as ComplianceCheck;
       }
     }
 

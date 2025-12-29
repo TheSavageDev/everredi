@@ -13,8 +13,8 @@ import {
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { KitTemplatesService } from './kit-templates.service';
-import { UserKitsService } from './user-kits.service';
+import { KitTemplatesService, KitTemplate } from './kit-templates.service';
+import { UserKitsService, UserKit } from './user-kits.service';
 import { PublicTemplatesService } from './public-templates.service';
 
 @Controller('kits')
@@ -29,7 +29,7 @@ export class KitsController {
 
   // Kit Templates
   @Get()
-  async getKitTemplates(@CurrentUser() user: any) {
+  async getKitTemplates(@CurrentUser() user: { uid: string }) {
     const templates = await this.templatesService.getKitTemplates(user.uid);
     return {
       success: true,
@@ -40,10 +40,16 @@ export class KitsController {
   }
 
   @Post()
-  async createKitTemplate(@CurrentUser() user: any, @Body() templateData: any) {
+  async createKitTemplate(
+    @CurrentUser() user: { uid: string },
+    @Body() templateData: Record<string, unknown>,
+  ) {
     const template = await this.templatesService.createKitTemplate(
       user.uid,
-      templateData,
+      templateData as unknown as Omit<
+        KitTemplate,
+        'id' | 'updatedAt' | 'createdAt' | 'userId'
+      >,
     );
     return {
       success: true,
@@ -54,7 +60,10 @@ export class KitsController {
   }
 
   @Get(':id')
-  async getKitTemplate(@CurrentUser() user: any, @Param('id') id: string) {
+  async getKitTemplate(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     const template = await this.templatesService.getKitTemplate(user.uid, id);
     return {
       success: true,
@@ -66,9 +75,9 @@ export class KitsController {
 
   @Put(':id')
   async updateKitTemplate(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
-    @Body() updates: any,
+    @Body() updates: Record<string, unknown>,
   ) {
     const template = await this.templatesService.updateKitTemplate(
       user.uid,
@@ -84,7 +93,10 @@ export class KitsController {
   }
 
   @Delete(':id')
-  async deleteKitTemplate(@CurrentUser() user: any, @Param('id') id: string) {
+  async deleteKitTemplate(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     await this.templatesService.deleteKitTemplate(user.uid, id);
     return {
       success: true,
@@ -106,7 +118,7 @@ export class UserKitsController {
   ) {}
 
   @Get()
-  async getUserKits(@CurrentUser() user: any) {
+  async getUserKits(@CurrentUser() user: { uid: string }) {
     const kits = await this.userKitsService.getUserKits(user.uid);
     return {
       success: true,
@@ -117,8 +129,17 @@ export class UserKitsController {
   }
 
   @Post()
-  async createUserKit(@CurrentUser() user: any, @Body() kitData: any) {
-    const kit = await this.userKitsService.createUserKit(user.uid, kitData);
+  async createUserKit(
+    @CurrentUser() user: { uid: string },
+    @Body() kitData: Record<string, unknown>,
+  ) {
+    const kit = await this.userKitsService.createUserKit(
+      user.uid,
+      kitData as unknown as Omit<
+        UserKit,
+        'id' | 'userId' | 'createdAt' | 'updatedAt'
+      >,
+    );
     return {
       success: true,
       data: kit,
@@ -129,7 +150,7 @@ export class UserKitsController {
 
   @Post('from-template')
   async createUserKitFromTemplate(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body()
     body: {
       templateId: string;
@@ -162,9 +183,11 @@ export class UserKitsController {
         this.logger.log(
           `Found ${templateItems.length} items in public template ${body.templateId}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(
-          `Failed to get items from public template: ${error.message}`,
+          `Failed to get items from public template: ${errorMessage}`,
         );
         templateItems = [];
       }
@@ -179,10 +202,13 @@ export class UserKitsController {
         this.logger.log(
           `Found ${templateItems.length} items in user template ${body.templateId} for user ${user.uid}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        const errorStack = error instanceof Error ? error.stack : undefined;
         this.logger.error(
-          `Failed to get template items for template ${body.templateId}: ${error.message}`,
-          error.stack,
+          `Failed to get template items for template ${body.templateId}: ${errorMessage}`,
+          errorStack,
         );
         templateItems = [];
       }
@@ -226,7 +252,10 @@ export class UserKitsController {
   }
 
   @Get(':id')
-  async getUserKit(@CurrentUser() user: any, @Param('id') id: string) {
+  async getUserKit(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     const kit = await this.userKitsService.getUserKit(user.uid, id);
     return {
       success: true,
@@ -237,7 +266,10 @@ export class UserKitsController {
   }
 
   @Get(':id/items')
-  async getkitItems(@CurrentUser() user: any, @Param('id') id: string) {
+  async getkitItems(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     const items = await this.userKitsService.getkitItems(user.uid, id);
     return {
       success: true,
@@ -249,7 +281,7 @@ export class UserKitsController {
 
   @Post(':id/items')
   async createKitItemInstance(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Body() itemData: any,
   ) {
@@ -268,7 +300,7 @@ export class UserKitsController {
 
   @Put(':id/items/:itemId')
   async updateKitItemInstance(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body()
@@ -295,7 +327,7 @@ export class UserKitsController {
 
   @Post(':id/items/:itemId/move')
   async moveKitItemInstance(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() body: { targetKitId: string },
@@ -316,7 +348,7 @@ export class UserKitsController {
 
   @Delete(':id/items/:itemId')
   async deleteKitItemInstance(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Param('itemId') itemId: string,
   ) {
@@ -330,7 +362,7 @@ export class UserKitsController {
 
   @Put(':id')
   async updateUserKit(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Body() updates: any,
   ) {
@@ -344,7 +376,10 @@ export class UserKitsController {
   }
 
   @Delete(':id')
-  async deleteUserKit(@CurrentUser() user: any, @Param('id') id: string) {
+  async deleteUserKit(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     await this.userKitsService.deleteUserKit(user.uid, id);
     return {
       success: true,
@@ -382,7 +417,7 @@ export class PublicTemplatesController {
   @Post()
   @UseGuards(AdminGuard)
   async createPublicTemplate(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() templateData: any,
   ) {
     const template = await this.publicTemplatesService.createPublicTemplate({
@@ -400,7 +435,7 @@ export class PublicTemplatesController {
   @Put(':id')
   @UseGuards(AdminGuard)
   async updatePublicTemplate(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Body() updates: any,
   ) {
@@ -419,7 +454,7 @@ export class PublicTemplatesController {
   @Delete(':id')
   @UseGuards(AdminGuard)
   async deletePublicTemplate(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
   ) {
     await this.publicTemplatesService.deletePublicTemplate(id);

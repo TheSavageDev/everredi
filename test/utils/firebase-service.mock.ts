@@ -1,10 +1,15 @@
 import { FirebaseService } from '../../src/config/firebase.service';
 import { Timestamp } from 'firebase-admin/firestore';
+import type { firestore } from 'firebase-admin';
 
 /**
  * Creates a mock FirebaseService for testing
  */
-export function createFirebaseServiceMock(): Partial<FirebaseService> {
+export function createFirebaseServiceMock(): Partial<FirebaseService> & {
+  _setMockData: (key: string, data: unknown[]) => void;
+  _setMockDocument: (key: string, doc: unknown) => void;
+  _clearAll: () => void;
+} {
   const mockData: Map<string, any[]> = new Map();
   const mockDocuments: Map<string, any> = new Map();
 
@@ -168,9 +173,12 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
         };
         const existing = mockData.get(collectionPath) || [];
         mockData.set(collectionPath, [...existing, doc]);
-        return doc as T & { id: string };
+        return doc as unknown as T & { id: string };
       },
-    ),
+    ) as <T = any>(
+      collectionPath: string,
+      data: Partial<T>,
+    ) => Promise<T & { id: string }>,
 
     addSubcollectionDocument: jest.fn(
       async <T = any>(
@@ -189,9 +197,14 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
         };
         const existing = mockData.get(key) || [];
         mockData.set(key, [...existing, doc]);
-        return doc as T & { id: string };
+        return doc as unknown as T & { id: string };
       },
-    ),
+    ) as <T = any>(
+      collectionPath: string,
+      parentDocId: string,
+      subcollectionPath: string,
+      data: Partial<T>,
+    ) => Promise<T & { id: string }>,
 
     updateDocument: jest.fn(
       async <T = any>(
@@ -210,9 +223,13 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
           updatedAt: Timestamp.now(),
         };
         mockDocuments.set(key, updated);
-        return updated as T & { id: string };
+        return updated as unknown as T & { id: string };
       },
-    ),
+    ) as <T = any>(
+      collectionPath: string,
+      docId: string,
+      data: Partial<T>,
+    ) => Promise<T & { id: string }>,
 
     updateSubcollectionDocument: jest.fn(
       async <T = any>(
@@ -235,19 +252,26 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
           updatedAt: Timestamp.now(),
         };
         mockDocuments.set(key, updated);
-        return updated as T & { id: string };
+        return updated as unknown as T & { id: string };
       },
-    ),
+    ) as <T = any>(
+      collectionPath: string,
+      parentDocId: string,
+      subcollectionPath: string,
+      docId: string,
+      data: Partial<T>,
+    ) => Promise<T & { id: string }>,
 
     deleteDocument: jest.fn(
-      async (collectionPath: string, docId: string): Promise<void> => {
+      (collectionPath: string, docId: string): Promise<void> => {
         const key = `${collectionPath}/${docId}`;
         mockDocuments.delete(key);
+        return Promise.resolve();
       },
     ),
 
     deleteSubcollectionDocument: jest.fn(
-      async (
+      (
         collectionPath: string,
         parentDocId: string,
         subcollectionPath: string,
@@ -255,6 +279,7 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
       ): Promise<void> => {
         const key = `${collectionPath}/${parentDocId}/${subcollectionPath}/${docId}`;
         mockDocuments.delete(key);
+        return Promise.resolve();
       },
     ),
 
@@ -269,35 +294,44 @@ export function createFirebaseServiceMock(): Partial<FirebaseService> {
         delete: jest.fn((ref: any) => {
           deletes.push(ref);
         }),
-        commit: jest.fn(async () => {
+        commit: jest.fn(() => {
           // Apply updates and deletes
-          for (const { ref, data } of updates) {
-            // In a real implementation, this would update the document
-            // For testing, we'll just track the calls
-          }
-          for (const ref of deletes) {
-            // In a real implementation, this would delete the document
-            // For testing, we'll just track the calls
-          }
+          // In a real implementation, this would update/delete the documents
+          // For testing, we'll just track the calls
+          void updates;
+          void deletes;
+          return Promise.resolve();
         }),
       };
-    }),
+    }) as unknown as () => firestore.WriteBatch,
 
-    getSubcollectionDocumentRef: jest.fn((...args: any[]) => ({
-      id: args[args.length - 1],
-      path: args.join('/'),
-    })),
+    getSubcollectionDocumentRef: jest.fn(
+      (
+        collectionPath: string,
+        parentDocId: string,
+        subcollectionPath: string,
+        docId: string,
+      ) => ({
+        id: docId,
+        path: `${collectionPath}/${parentDocId}/${subcollectionPath}/${docId}`,
+      }),
+    ) as unknown as (
+      collectionPath: string,
+      parentDocId: string,
+      subcollectionPath: string,
+      docId: string,
+    ) => firestore.DocumentReference,
 
     // Helper methods for test setup
-    _setMockData: (key: string, data: any[]) => {
+    _setMockData: (key: string, data: unknown[]) => {
       mockData.set(key, data);
     },
-    _setMockDocument: (key: string, doc: any) => {
+    _setMockDocument: (key: string, doc: unknown) => {
       mockDocuments.set(key, doc);
     },
     _clearAll: () => {
       mockData.clear();
       mockDocuments.clear();
     },
-  } as any;
+  };
 }

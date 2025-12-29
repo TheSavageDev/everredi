@@ -31,7 +31,7 @@ export class BulkOperationsService {
 
   async importInventoryFromJSON(
     userId: string,
-    jsonData: any[],
+    jsonData: unknown[],
   ): Promise<BulkImportResult> {
     const result: BulkImportResult = {
       success: 0,
@@ -39,8 +39,22 @@ export class BulkOperationsService {
       errors: [],
     };
 
+    interface ImportRow {
+      supplyName?: string;
+      locationId?: string;
+      quantity?: number | string;
+      status?: string;
+      expirationDate?: string;
+      purchaseDate?: string;
+      purchasePrice?: number | string;
+      supplier?: string;
+      notes?: string;
+      supplyId?: string;
+      supplyCategoryId?: string;
+    }
+
     for (let i = 0; i < jsonData.length; i++) {
-      const row = jsonData[i];
+      const row = jsonData[i] as ImportRow;
       try {
         // Validate required fields
         if (!row.supplyName || !row.locationId || row.quantity === undefined) {
@@ -63,13 +77,21 @@ export class BulkOperationsService {
         > = {
           supplyName: row.supplyName,
           locationId: row.locationId,
-          quantity: parseInt(row.quantity, 10) || 0,
-          status: row.status || 'active',
+          quantity:
+            typeof row.quantity === 'number'
+              ? row.quantity
+              : parseInt(String(row.quantity), 10) || 0,
+          status:
+            (row.status as 'active' | 'expired' | 'used' | 'disposed') ||
+            'active',
           expirationDate,
           purchaseDate,
-          purchasePrice: row.purchasePrice
-            ? parseFloat(row.purchasePrice)
-            : undefined,
+          purchasePrice:
+            row.purchasePrice !== undefined
+              ? typeof row.purchasePrice === 'number'
+                ? row.purchasePrice
+                : parseFloat(String(row.purchasePrice))
+              : undefined,
           supplier: row.supplier,
           notes: row.notes,
           supplyId: row.supplyId,
@@ -78,11 +100,13 @@ export class BulkOperationsService {
 
         await this.inventoryService.createInventoryItem(userId, itemData);
         result.success++;
-      } catch (error: any) {
+      } catch (error: unknown) {
         result.failed++;
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         result.errors.push({
           row: i + 1,
-          error: error.message || 'Unknown error',
+          error: errorMessage,
         });
       }
     }
@@ -90,7 +114,9 @@ export class BulkOperationsService {
     return result;
   }
 
-  async exportInventory(userId: string): Promise<any[]> {
+  async exportInventory(
+    userId: string,
+  ): Promise<Array<Record<string, unknown>>> {
     const snapshot = await this.firestore
       .collection('users')
       .doc(userId)
@@ -98,7 +124,19 @@ export class BulkOperationsService {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
+      const data = doc.data() as {
+        supplyName?: string;
+        supplyId?: string;
+        locationId?: string;
+        quantity?: number;
+        status?: string;
+        expirationDate?: Timestamp;
+        purchaseDate?: Timestamp;
+        purchasePrice?: number;
+        supplier?: string;
+        notes?: string;
+        supplyCategoryId?: string;
+      };
       return {
         id: doc.id,
         supplyName: data.supplyName,
@@ -116,9 +154,9 @@ export class BulkOperationsService {
     });
   }
 
-  async exportKits(userId: string): Promise<any[]> {
+  async exportKits(userId: string): Promise<Array<Record<string, unknown>>> {
     const kits = await this.userKitsService.getUserKits(userId);
-    const result: any[] = [];
+    const result: Array<Record<string, unknown>> = [];
 
     for (const kit of kits) {
       const items = await this.userKitsService.getkitItems(userId, kit.id);
@@ -165,7 +203,7 @@ export class BulkOperationsService {
         }
 
         // Prepare update data
-        const updateData: any = {
+        const updateData: Record<string, unknown> = {
           updatedAt: Timestamp.now(),
         };
 
@@ -176,14 +214,17 @@ export class BulkOperationsService {
           updateData.locationId = request.updates.locationId;
         }
         if (request.updates.expirationDate !== undefined) {
-          updateData.expirationDate = this.parseDate(
-            request.updates.expirationDate as any,
-          );
+          const expirationDateValue = request.updates.expirationDate;
+          if (typeof expirationDateValue === 'string') {
+            updateData.expirationDate = this.parseDate(expirationDateValue);
+          } else if (expirationDateValue instanceof Timestamp) {
+            updateData.expirationDate = expirationDateValue;
+          }
         }
 
         await itemDoc.ref.update(updateData);
         updated++;
-      } catch (error) {
+      } catch {
         failed++;
       }
     }

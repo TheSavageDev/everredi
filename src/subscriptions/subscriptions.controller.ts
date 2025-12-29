@@ -30,7 +30,7 @@ export class SubscriptionsController {
   @Post('create-checkout')
   @UseGuards(FirebaseAuthGuard)
   async createCheckoutSession(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() body: { priceId: string; mode?: 'subscription' | 'payment' },
   ) {
     const session = await this.subscriptionsService.createCheckoutSession(
@@ -48,7 +48,7 @@ export class SubscriptionsController {
 
   @Post('portal')
   @UseGuards(FirebaseAuthGuard)
-  async createCustomerPortal(@CurrentUser() user: any) {
+  async createCustomerPortal(@CurrentUser() user: { uid: string }) {
     const session = await this.subscriptionsService.createCustomerPortalSession(
       user.uid,
     );
@@ -73,20 +73,22 @@ export class SubscriptionsController {
       );
       await this.subscriptionsService.handleWebhookEvent(event);
       return { received: true };
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
         'Webhook error:',
         error instanceof Error ? error.stack : String(error),
       );
-      return { received: false, error: error.message };
+      return { received: false, error: errorMessage };
     }
   }
 
   @Get('revenuecat/info')
   @UseGuards(FirebaseAuthGuard)
-  async getRevenueCatInfo(@CurrentUser() user: any): Promise<{
+  async getRevenueCatInfo(@CurrentUser() user: { uid: string }): Promise<{
     success: boolean;
-    data?: any;
+    data?: unknown;
     error?: { message: string };
     message?: string;
     timestamp: string;
@@ -97,15 +99,19 @@ export class SubscriptionsController {
       );
       return {
         success: true,
-        data: customerInfo,
+        data: customerInfo as unknown,
         message: 'Customer info retrieved successfully',
         timestamp: new Date().toISOString(),
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve customer info';
       return {
         success: false,
         error: {
-          message: error.message || 'Failed to retrieve customer info',
+          message: errorMessage,
         },
         timestamp: new Date().toISOString(),
       };
@@ -115,11 +121,11 @@ export class SubscriptionsController {
   @Post('revenuecat/cancel')
   @UseGuards(FirebaseAuthGuard)
   async cancelRevenueCatSubscription(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() body: { productId: string },
   ): Promise<{
     success: boolean;
-    data?: any;
+    data?: unknown;
     error?: { message: string };
     message?: string;
     timestamp: string;
@@ -131,15 +137,19 @@ export class SubscriptionsController {
       );
       return {
         success: true,
-        data: result,
+        data: result as unknown,
         message: 'Subscription cancelled successfully',
         timestamp: new Date().toISOString(),
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Failed to cancel subscription';
       return {
         success: false,
         error: {
-          message: error.message || 'Failed to cancel subscription',
+          message: errorMessage,
         },
         timestamp: new Date().toISOString(),
       };

@@ -4,7 +4,7 @@ import { createTestingApp } from './utils/create-testing-app';
 
 describe('AppController (e2e)', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
     context = await createTestingApp();

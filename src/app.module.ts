@@ -27,7 +27,6 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SupportModule } from './support/support.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { BrandPartnershipsModule } from './brands/brand-partnerships.module';
-import { EnvValidationService } from './config/env-validation.service';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';

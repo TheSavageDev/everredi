@@ -16,9 +16,14 @@ describe('UsersService', () => {
 
   let service: UsersService;
 
+  const firebaseAuthMock = {} as unknown as auth.Auth;
+
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new UsersService(firestoreMock as any);
+    service = new UsersService(
+      firestoreMock as unknown as firestore.Firestore,
+      firebaseAuthMock,
+    );
   });
 
   it('creates a new user when none exists', async () => {

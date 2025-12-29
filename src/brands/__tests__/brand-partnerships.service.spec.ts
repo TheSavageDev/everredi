@@ -12,7 +12,9 @@ describe('BrandPartnershipsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (firebaseServiceMock._clearAll as jest.Mock)();
-    service = new BrandPartnershipsService(firebaseServiceMock as any);
+    service = new BrandPartnershipsService(
+      firebaseServiceMock as unknown as FirebaseService,
+    );
   });
 
   describe('getActivePartnerships', () => {

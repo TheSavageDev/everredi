@@ -56,7 +56,15 @@ export class AnalyticsService {
 
   async getUsagePatterns(userId: string): Promise<UsagePattern[]> {
     // Get all inventory items
-    const items = await this.firebaseService.getSubcollection(
+    interface InventoryItem {
+      id: string;
+      status?: string;
+      supplyId?: string;
+      supplyName?: string;
+      updatedAt?: Timestamp;
+    }
+
+    const items = await this.firebaseService.getSubcollection<InventoryItem>(
       'users',
       userId,
       'inventoryItems',
@@ -74,7 +82,7 @@ export class AnalyticsService {
       }
     >();
 
-    items.forEach((item: any) => {
+    items.forEach((item) => {
       if (item.status === 'used' && item.supplyId) {
         const defaultUsage = {
           supplyId: item.supplyId,
@@ -108,7 +116,7 @@ export class AnalyticsService {
 
     const patterns: UsagePattern[] = [];
 
-    for (const [supplyId, data] of supplyUsage.entries()) {
+    for (const [, data] of supplyUsage.entries()) {
       const recentDates = data.dates.filter((date) => date >= sixMonthsAgo);
       const averageUsagePerMonth = recentDates.length / 6;
 
@@ -156,20 +164,30 @@ export class AnalyticsService {
       now.toMillis() + daysAhead * 24 * 60 * 60 * 1000,
     );
 
-    const inventorySnapshot = await this.firebaseService.getSubcollection(
-      'users',
-      userId,
-      'inventoryItems',
-      {
-        where: [{ field: 'status', operator: '==', value: 'active' }],
-      },
-    );
+    interface InventoryItem {
+      id: string;
+      expirationDate?: Timestamp;
+      purchasePrice?: number;
+      quantity?: number;
+      supplyName?: string;
+      categoryName?: string;
+    }
+
+    const inventorySnapshot =
+      await this.firebaseService.getSubcollection<InventoryItem>(
+        'users',
+        userId,
+        'inventoryItems',
+        {
+          where: [{ field: 'status', operator: '==', value: 'active' }],
+        },
+      );
 
     const forecasts: ExpirationForecast[] = [];
 
     for (const item of inventorySnapshot) {
       if (item.expirationDate && item.expirationDate <= futureDate) {
-        const expirationDate = item.expirationDate as Timestamp;
+        const expirationDate = item.expirationDate;
         const daysUntilExpiration = Math.ceil(
           (expirationDate.toMillis() - now.toMillis()) / (24 * 60 * 60 * 1000),
         );
@@ -194,7 +212,16 @@ export class AnalyticsService {
   }
 
   async getCostTracking(userId: string): Promise<CostTracking> {
-    const items = await this.firebaseService.getSubcollection(
+    interface InventoryItem {
+      id: string;
+      purchasePrice?: number;
+      quantity?: number;
+      categoryId?: string;
+      categoryName?: string;
+      purchaseDate?: Timestamp;
+    }
+
+    const items = await this.firebaseService.getSubcollection<InventoryItem>(
       'users',
       userId,
       'inventoryItems',
@@ -241,7 +268,7 @@ export class AnalyticsService {
 
     items.forEach((item) => {
       if (item.purchaseDate && item.purchasePrice) {
-        const purchaseDate = (item.purchaseDate as Timestamp).toDate();
+        const purchaseDate = item.purchaseDate.toDate();
         if (purchaseDate >= oneYearAgo) {
           const monthKey = `${purchaseDate.getFullYear()}-${String(purchaseDate.getMonth() + 1).padStart(2, '0')}`;
           const existing = monthlySpending.get(monthKey) || 0;
@@ -276,7 +303,18 @@ export class AnalyticsService {
     userId: string,
     limit: number = 10,
   ): Promise<ComplianceTrend[]> {
-    const kits = await this.firebaseService.getSubcollection(
+    interface UserKit {
+      id: string;
+      name?: string;
+    }
+
+    interface ComplianceCheck {
+      complianceScore?: number;
+      createdAt?: Timestamp;
+      missingItems?: Array<unknown>;
+    }
+
+    const kits = await this.firebaseService.getSubcollection<UserKit>(
       'users',
       userId,
       'userKits',
@@ -299,7 +337,7 @@ export class AnalyticsService {
         .get();
 
       if (!checksSnapshot.empty) {
-        const check = checksSnapshot.docs[0].data() as any;
+        const check = checksSnapshot.docs[0].data() as ComplianceCheck;
         trends.push({
           kitId: kit.id,
           kitName: kit.name || 'Unnamed Kit',

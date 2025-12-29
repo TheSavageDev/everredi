@@ -1,5 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from './config.module';
+import { UsersModule } from '../users/users.module';
 import {
   FirebaseApp,
   firestoreProvider,
@@ -12,7 +13,7 @@ import { FirebaseController } from './firebase.controller';
 
 @Global()
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, UsersModule],
   controllers: [FirebaseController],
   providers: [
     FirebaseApp,

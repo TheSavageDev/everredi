@@ -10,7 +10,7 @@ export class ComplianceController {
 
   @Post('check')
   async checkCompliance(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Body() body: { userKitId: string; oshaRuleId?: string; industry?: string },
   ) {
     const check = await this.complianceService.checkCompliance(
@@ -28,7 +28,7 @@ export class ComplianceController {
   }
 
   @Get('checks')
-  async getComplianceChecks(@CurrentUser() user: any) {
+  async getComplianceChecks(@CurrentUser() user: { uid: string }) {
     const checks = await this.complianceService.getComplianceChecks(user.uid);
     return {
       success: true,
@@ -39,7 +39,10 @@ export class ComplianceController {
   }
 
   @Get('checks/:id')
-  async getComplianceCheck(@CurrentUser() user: any, @Param('id') id: string) {
+  async getComplianceCheck(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     const check = await this.complianceService.getComplianceCheck(user.uid, id);
     if (!check) {
       return {

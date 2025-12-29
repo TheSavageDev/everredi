@@ -29,7 +29,7 @@ export class PublicTemplatesService {
   async getPublicTemplates(
     purpose?: string,
     skillLevel?: string,
-  ): Promise<any[]> {
+  ): Promise<PublicKitTemplate[]> {
     let query = this.firestore
       .collection('publicKitTemplates')
       .where('isActive', '==', true);
@@ -45,8 +45,8 @@ export class PublicTemplatesService {
     const snapshot = await query.orderBy('createdAt', 'desc').limit(50).get();
     return snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
-    }));
+      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
+    })) as PublicKitTemplate[];
   }
 
   async getPublicTemplate(templateId: string): Promise<PublicKitTemplate> {
@@ -59,7 +59,10 @@ export class PublicTemplatesService {
       throw new NotFoundException('Public kit template not found');
     }
 
-    return { id: doc.id, ...doc.data() } as PublicKitTemplate;
+    return {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
+    } as PublicKitTemplate;
   }
 
   async createPublicTemplate(
@@ -77,7 +80,10 @@ export class PublicTemplatesService {
     });
 
     const doc = await docRef.get();
-    return { id: doc.id, ...doc.data() } as PublicKitTemplate;
+    return {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
+    } as PublicKitTemplate;
   }
 
   async updatePublicTemplate(
@@ -135,14 +141,21 @@ export class PublicTemplatesService {
     }
 
     const doc = snapshot.docs[0];
-    return { id: doc.id, ...doc.data() } as PublicKitTemplate;
+    return {
+      id: doc.id,
+      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
+    } as PublicKitTemplate;
   }
 
   /**
    * Calculate item quantity based on people count
    */
   private calculateItemQuantity(
-    item: any,
+    item: {
+      quantity: number;
+      scalesWithPeople?: boolean;
+      peopleCountQuantities?: Record<number, number>;
+    },
     selectedPeopleCount: number,
     defaultPeopleCount: number,
   ): number {

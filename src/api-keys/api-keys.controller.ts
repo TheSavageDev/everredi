@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiKeysService } from './api-keys.service';
 
@@ -18,6 +19,7 @@ export class ApiKeysController {
   constructor(private readonly apiKeysService: ApiKeysService) {}
 
   @Post()
+  @Premium()
   async generateApiKey(
     @CurrentUser('uid') userId: string,
     @Body() body: { name: string; expiresInDays?: number },

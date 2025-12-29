@@ -5,7 +5,7 @@ import { TEST_AUTH_HEADER } from '../utils/test-auth';
 
 describe('API Smoke E2E', () => {
   let context: TestAppContext;
-  let server: unknown;
+  let server: any;
 
   beforeEach(async () => {
     context = await createTestingApp();
@@ -48,12 +48,14 @@ describe('API Smoke E2E', () => {
     expect(res.status).toBe(200);
   });
 
-  it('GET /api/notifications/preferences responds successfully', async () => {
+  it('GET /api/notifications/preferences requires premium', async () => {
     const res = await request(server)
       .get('/api/notifications/preferences')
       .set(TEST_AUTH_HEADER);
 
-    expect(res.status).toBe(200);
+    // This endpoint is now a premium feature (moved to AdvancedNotificationsController)
+    expect(res.status).toBe(403);
+    expect(res.body).toHaveProperty('code', 'PREMIUM_REQUIRED');
   });
 
   it('GET /api/kits responds successfully', async () => {

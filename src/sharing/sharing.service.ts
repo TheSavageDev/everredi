@@ -163,7 +163,12 @@ export class SharingService {
       : undefined;
 
     // Build the document data, only including expiresAt if it's defined
-    const linkData: any = {
+    const linkData: {
+      linkToken: string;
+      permission: string;
+      createdAt: Timestamp;
+      expiresAt?: Timestamp;
+    } = {
       linkToken,
       permission,
       createdAt: now,
@@ -180,7 +185,7 @@ export class SharingService {
       .collection('userKits')
       .doc(kitId.trim())
       .collection('shareLinks')
-      .add(linkData);
+      .add(linkData as firestore.DocumentData);
 
     const linkDoc = await linkRef.get();
     return {

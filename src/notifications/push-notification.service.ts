@@ -1,6 +1,5 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { FIRESTORE } from '../config/firebase.provider';
+import { Injectable, Logger } from '@nestjs/common';
+import { FirebaseService } from '../config/firebase.service';
 import * as admin from 'firebase-admin';
 import { DocumentData, Timestamp } from 'firebase-admin/firestore';
 

@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { InventoryService } from './inventory.service';
+import { InventoryService, InventoryItem } from './inventory.service';
 
 @Controller('inventory')
 @UseGuards(FirebaseAuthGuard)
@@ -19,7 +19,7 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get()
-  async getInventoryItems(@CurrentUser() user: any) {
+  async getInventoryItems(@CurrentUser() user: { uid: string }) {
     const items = await this.inventoryService.getInventoryItems(user.uid);
     return {
       success: true,
@@ -30,10 +30,29 @@ export class InventoryController {
   }
 
   @Post()
-  async createInventoryItem(@CurrentUser() user: any, @Body() itemData: any) {
+  async createInventoryItem(
+    @CurrentUser() user: { uid: string },
+    @Body()
+    itemData: Partial<{
+      supplyId?: string;
+      supplyName?: string;
+      supplyCategoryId?: string;
+      locationId?: string;
+      quantity?: number;
+      expirationDate?: string;
+      purchaseDate?: string;
+      purchasePrice?: number;
+      supplier?: string;
+      notes?: string;
+      status?: string;
+    }>,
+  ) {
     const item = await this.inventoryService.createInventoryItem(
       user.uid,
-      itemData,
+      itemData as Omit<
+        InventoryItem,
+        'id' | 'updatedAt' | 'createdAt' | 'userId' | 'sentNotifications'
+      >,
     );
     return {
       success: true,
@@ -45,14 +64,27 @@ export class InventoryController {
 
   @Put(':id')
   async updateInventoryItem(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
-    @Body() updates: any,
+    @Body()
+    updates: Partial<{
+      supplyId?: string;
+      supplyName?: string;
+      supplyCategoryId?: string;
+      locationId?: string;
+      quantity?: number;
+      expirationDate?: string;
+      purchaseDate?: string;
+      purchasePrice?: number;
+      supplier?: string;
+      notes?: string;
+      status?: string;
+    }>,
   ) {
     const item = await this.inventoryService.updateInventoryItem(
       user.uid,
       id,
-      updates,
+      updates as Partial<InventoryItem>,
     );
     return {
       success: true,
@@ -63,7 +95,10 @@ export class InventoryController {
   }
 
   @Delete(':id')
-  async deleteInventoryItem(@CurrentUser() user: any, @Param('id') id: string) {
+  async deleteInventoryItem(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
     await this.inventoryService.deleteInventoryItem(user.uid, id);
     return {
       success: true,
@@ -74,7 +109,7 @@ export class InventoryController {
 
   @Get('search')
   async searchInventoryItems(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Query('term') term: string,
   ) {
     if (!term) {
@@ -101,7 +136,7 @@ export class InventoryController {
 
   @Get('expiring')
   async getExpiringItems(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { uid: string },
     @Query('days') days?: string,
   ) {
     const daysNum = days ? parseInt(days, 10) : undefined;

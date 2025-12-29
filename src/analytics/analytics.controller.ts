@@ -1,14 +1,17 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { PremiumGuard } from '../common/guards/premium.guard';
+import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(FirebaseAuthGuard, PremiumGuard)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('usage-patterns')
+  @Premium()
   async getUsagePatterns(@CurrentUser('uid') userId: string) {
     const patterns = await this.analyticsService.getUsagePatterns(userId);
     return {

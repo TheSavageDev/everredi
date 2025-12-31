@@ -70,6 +70,14 @@ async function bootstrap() {
       `   CORS_ORIGIN from process.env: ${corsOriginFromEnv || '(not set)'}`,
     );
     logger.log(`   Resolved CORS_ORIGIN: ${corsOrigin}`);
+    
+    // Log all environment variables that start with CORS for debugging
+    const corsEnvVars = Object.keys(process.env)
+      .filter((key) => key.toUpperCase().includes('CORS'))
+      .map((key) => `${key}=${process.env[key]}`);
+    if (corsEnvVars.length > 0) {
+      logger.log(`   All CORS-related env vars: ${corsEnvVars.join(', ')}`);
+    }
 
     // Warn if there's a mismatch between ConfigService and process.env
     if (

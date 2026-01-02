@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
 
@@ -22,12 +23,28 @@ interface RequestWithUser {
   };
 }
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
+  private readonly logger = new Logger(UserThrottlerGuard.name);
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Skip throttling entirely in development
+    if (isDevelopment) {
+      return true;
+    }
+    return super.canActivate(context);
+  }
+
   protected async getTracker(req: RequestWithUser): Promise<string> {
     // Use user UID if available (from Firebase Auth or API Key)
     if (req.user?.uid) {
-      return `user:${req.user.uid}`;
+      const tracker = `user:${req.user.uid}`;
+      this.logger.debug(
+        `[${new Date().toISOString()}] 📊 Rate limit tracker: ${tracker} (user-based)`,
+      );
+      return tracker;
     }
 
     // Fallback to IP address for unauthenticated requests
@@ -40,7 +57,11 @@ export class UserThrottlerGuard extends ThrottlerGuard {
 
     const ip =
       req.ip || forwardedIp || req.connection?.remoteAddress || 'unknown';
-    return `ip:${ip}`;
+    const tracker = `ip:${ip}`;
+    this.logger.debug(
+      `[${new Date().toISOString()}] 📊 Rate limit tracker: ${tracker} (IP-based)`,
+    );
+    return tracker;
   }
 
   protected generateKey(
@@ -60,7 +81,18 @@ export class UserThrottlerGuard extends ThrottlerGuard {
       [key: string]: unknown;
     }
 
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
     const response = context.switchToHttp().getResponse();
+    const timestamp = new Date().toISOString();
+    const method = (request as { method?: string }).method || 'UNKNOWN';
+    const url = (request as { url?: string }).url || 'UNKNOWN';
+    const userInfo = request.user?.uid
+      ? `user=${request.user.uid}`
+      : `ip=${request.ip || 'unknown'}`;
+
+    this.logger.warn(
+      `[${timestamp}] 🚫 RATE LIMIT EXCEEDED: ${method} ${url} - ${userInfo} - Limit: ${throttlerLimitDetail.limit}/${Math.ceil(throttlerLimitDetail.ttl / 1000 / 60)}min, Hits: ${throttlerLimitDetail.totalHits}, Retry after: ${Math.ceil(throttlerLimitDetail.timeToExpire / 1000)}s`,
+    );
 
     // Return proper 429 status with rate limit headers
     response.setHeader(

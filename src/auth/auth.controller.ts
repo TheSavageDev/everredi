@@ -29,8 +29,11 @@ export class AuthController {
       request.ip ||
       request.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
       'unknown';
+    const timestamp = new Date().toISOString();
+    const userAgent = request.headers['user-agent'] || 'unknown';
+    
     this.logger.log(
-      `Auth sync attempt: user=${user.uid}, email=${user.email || 'no-email'}, ip=${ip}`,
+      `[${timestamp}] 🔐 POST /api/auth/create-or-update - Auth sync attempt: user=${user.uid}, email=${user.email || 'no-email'}, ip=${ip}, userAgent=${userAgent.substring(0, 50)}`,
     );
 
     const userData = await this.authService.createOrUpdateUser(
@@ -39,7 +42,9 @@ export class AuthController {
       user.name,
     );
 
-    this.logger.log(`Auth sync successful: user=${user.uid}`);
+    this.logger.log(
+      `[${new Date().toISOString()}] ✅ Auth sync successful: user=${user.uid}, email=${user.email || 'no-email'}`,
+    );
 
     return {
       success: true,

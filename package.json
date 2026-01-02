@@ -19,6 +19,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed:templates": "ts-node -r tsconfig-paths/register src/kits/seed-templates.ts",
+    "seed:staging": "ts-node -r tsconfig-paths/register scripts/seed-staging-templates.ts",
     "verify:templates": "ts-node -r tsconfig-paths/register src/kits/verify-template-items.ts",
     "verify:public": "ts-node -r tsconfig-paths/register src/kits/verify-public-template-items.ts",
     "set-admin": "ts-node -r tsconfig-paths/register scripts/set-admin-user.ts",

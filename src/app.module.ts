@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from './config/config.module';
@@ -31,15 +32,17 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    // Rate limiting: 1000 requests per hour per user
+    // Rate limiting: Disabled in development, 1000 requests per hour per user in production
     ThrottlerModule.forRoot([
       {
         name: 'default',
         ttl: 3600000, // 1 hour in milliseconds (3600 * 1000)
-        limit: 1000, // 1000 requests per hour
+        limit: isDevelopment ? 1000000 : 1000, // Very high limit in dev, 1000 in prod
       },
     ]),
     ConfigModule,

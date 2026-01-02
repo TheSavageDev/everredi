@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
@@ -11,10 +12,22 @@ import * as Sentry from '@sentry/node';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(LoggingInterceptor.name);
+
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<Request>();
     const { method, url, ip } = request;
     const startTime = Date.now();
+    const timestamp = new Date().toISOString();
+
+    // Log all requests, especially auth endpoints
+    if (url?.includes('/auth/')) {
+      const hasAuth = request.headers.authorization ? 'YES' : 'NO';
+      const userAgent = request.headers['user-agent']?.substring(0, 50) || 'unknown';
+      this.logger.log(
+        `[${timestamp}] 📥 INCOMING REQUEST: ${method} ${url} from ${ip} - Auth header: ${hasAuth} - UserAgent: ${userAgent}`,
+      );
+    }
 
     // Add breadcrumb for request
     Sentry.addBreadcrumb({
@@ -37,6 +50,15 @@ export class LoggingInterceptor implements NestInterceptor {
         }
         const response = context.switchToHttp().getResponse();
         const statusCode = response.statusCode;
+        const timestamp = new Date().toISOString();
+
+        // Log auth endpoint responses
+        if (url?.includes('/auth/')) {
+          const statusEmoji = statusCode >= 400 ? '❌' : statusCode >= 300 ? '⚠️' : '✅';
+          this.logger.log(
+            `[${timestamp}] ${statusEmoji} RESPONSE: ${method} ${url} - Status: ${statusCode} - Duration: ${duration}ms`,
+          );
+        }
 
         // Add breadcrumb for response
         Sentry.addBreadcrumb({

@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from './config/config.module';
@@ -28,7 +27,6 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SupportModule } from './support/support.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { BrandPartnershipsModule } from './brands/brand-partnerships.module';
-import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
@@ -43,6 +41,21 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
         name: 'default',
         ttl: 3600000, // 1 hour in milliseconds (3600 * 1000)
         limit: isDevelopment ? 1000000 : 1000, // Very high limit in dev, 1000 in prod
+      },
+      {
+        name: 'short',
+        ttl: 60000, // 1 minute in milliseconds (60 * 1000)
+        limit: 100, // 100 requests per minute
+      },
+      {
+        name: 'medium',
+        ttl: 3600000, // 1 hour in milliseconds (3600 * 1000)
+        limit: 1000, // 1000 requests per hour
+      },
+      {
+        name: 'long',
+        ttl: 86400000, // 1 day in milliseconds (24 * 60 * 60 * 1000)
+        limit: 10000, // 10000 requests per day
       },
     ]),
     ConfigModule,
@@ -72,10 +85,6 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
   controllers: [AppController],
   providers: [
     AppService,
-    {
-      provide: APP_GUARD,
-      useClass: UserThrottlerGuard,
-    },
     {
       provide: APP_FILTER,
       useClass: SentryExceptionFilter,

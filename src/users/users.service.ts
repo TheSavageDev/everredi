@@ -1,9 +1,10 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional, forwardRef } from '@nestjs/common';
 import type { firestore } from 'firebase-admin';
 import type { auth } from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { FIRESTORE } from '../config/firebase.provider';
 import { FIREBASE_AUTH } from '../config/firebase.provider';
+import { RevenueCatService } from '../subscriptions/revenuecat.service';
 
 export interface User {
   id: string;
@@ -32,10 +33,13 @@ export interface User {
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
+  private readonly ENTITLEMENT_ID = 'everredi_pro';
 
   constructor(
     @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
     @Inject(FIREBASE_AUTH) private readonly firebaseAuth: auth.Auth,
+    @Optional() @Inject(forwardRef(() => RevenueCatService))
+    private readonly revenueCatService?: RevenueCatService,
   ) {}
 
   async createOrUpdateUser(
@@ -188,19 +192,150 @@ export class UsersService {
     return { id: updatedDoc.id, ...updatedDoc.data() } as User;
   }
 
+  /**
+   * Get subscription status from RevenueCat Firestore collection (created by Firebase Extension)
+   * Falls back to user document if extension data not available
+   */
+  private async getRevenueCatSubscriptionFromFirestore(
+    userId: string,
+  ): Promise<{
+    isPremium: boolean;
+    expiresAt?: Date;
+  } | null> {
+    try {
+      const rcDoc = await this.firestore
+        .collection('revenuecat_customers')
+        .doc(userId)
+        .get();
+
+      if (!rcDoc.exists) {
+        return null;
+      }
+
+      const rcData = rcDoc.data();
+      if (!rcData) {
+        return null;
+      }
+
+      // Check for active entitlement
+      const entitlements = rcData.entitlements || {};
+      const entitlement = entitlements[this.ENTITLEMENT_ID];
+
+      if (!entitlement) {
+        return { isPremium: false };
+      }
+
+      // Check if entitlement is active (not expired)
+      const expiresDate = entitlement.expires_date
+        ? new Date(entitlement.expires_date)
+        : null;
+      const isExpired = expiresDate && expiresDate < new Date();
+      const isPremium = !isExpired;
+
+      return {
+        isPremium,
+        expiresAt: expiresDate || undefined,
+      };
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Failed to read RevenueCat data from Firestore for user ${userId}: ${errorMessage}`,
+      );
+      return null;
+    }
+  }
+
   async getSubscriptionStatus(userId: string) {
     const user = await this.getUserById(userId);
     if (!user) {
       throw new Error('User not found');
     }
-    const isPremium =
+
+    // First, try to get subscription status from RevenueCat Firestore collection
+    // (created by Firebase Extension - this is the source of truth)
+    const rcStatus = await this.getRevenueCatSubscriptionFromFirestore(userId);
+
+    if (rcStatus) {
+      // Sync RevenueCat status to user document for backward compatibility
+      const shouldUpdate =
+        user.subscriptionTier !== (rcStatus.isPremium ? 'premium' : 'free') ||
+        (rcStatus.isPremium && user.subscriptionStatus !== 'active');
+
+      if (shouldUpdate) {
+        await this.updateUser(userId, {
+          subscriptionTier: rcStatus.isPremium ? 'premium' : 'free',
+          subscriptionStatus: rcStatus.isPremium ? 'active' : 'expired',
+          subscriptionExpiresAt: rcStatus.expiresAt
+            ? Timestamp.fromDate(rcStatus.expiresAt)
+            : undefined,
+        });
+        this.logger.log(
+          `Synced RevenueCat subscription status to user document for ${userId}`,
+        );
+      }
+
+      // Re-fetch user to get updated data
+      const updatedUser = await this.getUserById(userId);
+
+      return {
+        tier: rcStatus.isPremium ? 'premium' : 'free',
+        status: rcStatus.isPremium ? 'active' : 'expired',
+        expiresAt: rcStatus.expiresAt?.toISOString(),
+        isPremium: rcStatus.isPremium,
+      };
+    }
+
+    // Fallback: Check user document (for Stripe subscriptions or if extension not set up)
+    let isPremium =
       user.subscriptionTier === 'premium' &&
       user.subscriptionStatus === 'active';
 
+    // If database shows free and extension not available, check RevenueCat API as fallback
+    if (!isPremium && this.revenueCatService) {
+      try {
+        const rcInfo = await this.revenueCatService.getCustomerInfo(userId);
+        const rcIsPremium = !!rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
+
+        if (rcIsPremium) {
+          // Sync RevenueCat status to database
+          const entitlement = rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
+          const expiresDate = entitlement.expires_date
+            ? new Date(entitlement.expires_date)
+            : null;
+
+          await this.updateUser(userId, {
+            subscriptionTier: 'premium',
+            subscriptionStatus: 'active',
+            subscriptionExpiresAt: expiresDate
+              ? Timestamp.fromDate(expiresDate)
+              : undefined,
+          });
+
+          isPremium = true;
+          this.logger.log(
+            `Synced RevenueCat premium status via API to database for user ${userId}`,
+          );
+        }
+      } catch (error: unknown) {
+        // Log but don't fail if RevenueCat check fails
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Failed to check RevenueCat status for user ${userId}: ${errorMessage}`,
+        );
+      }
+    }
+
+    // Re-fetch user to get updated subscription status if it was synced
+    const updatedUser = isPremium ? await this.getUserById(userId) : user;
+
     return {
-      tier: user.subscriptionTier,
-      status: user.subscriptionStatus,
-      expiresAt: user.subscriptionExpiresAt?.toDate().toISOString(),
+      tier: updatedUser?.subscriptionTier || user.subscriptionTier,
+      status: updatedUser?.subscriptionStatus || user.subscriptionStatus,
+      expiresAt:
+        updatedUser?.subscriptionExpiresAt?.toDate().toISOString() ||
+        user.subscriptionExpiresAt?.toDate().toISOString(),
       isPremium,
     };
   }

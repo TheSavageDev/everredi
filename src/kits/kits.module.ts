@@ -13,6 +13,7 @@ import { SupplyCategoriesModule } from '../supply-categories/supply-categories.m
 import { InventoryModule } from '../inventory/inventory.module';
 import { UsersModule } from '../users/users.module';
 import { TenantsModule } from '../tenants/tenants.module';
+import { ComplianceModule } from '../compliance/compliance.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { TenantsModule } from '../tenants/tenants.module';
     forwardRef(() => InventoryModule),
     UsersModule,
     TenantsModule,
+    forwardRef(() => ComplianceModule),
   ],
   controllers: [KitsController, UserKitsController, PublicTemplatesController],
   providers: [

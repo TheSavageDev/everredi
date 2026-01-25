@@ -403,6 +403,77 @@ export class UserKitsController {
     };
   }
 
+  @Post(':id/compliance/check')
+  async checkKitCompliance(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
+    const kit = await this.userKitsService.getUserKit(user.uid, id);
+    if (!kit.isOshaKit || !kit.oshaKitType) {
+      return {
+        success: false,
+        error: {
+          code: 'NOT_OSHA_KIT',
+          message: 'This kit is not designated as an OSHA kit',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    await this.userKitsService.recalculateCompliance(
+      user.uid,
+      id,
+      kit.oshaKitType,
+    );
+
+    // Reload kit to get updated compliance data
+    const updatedKit = await this.userKitsService.getUserKit(user.uid, id);
+
+    return {
+      success: true,
+      data: {
+        complianceStatus: updatedKit.complianceStatus,
+        complianceScore: updatedKit.complianceScore,
+        lastComplianceCheckAt: updatedKit.lastComplianceCheckAt,
+        complianceMetadata: updatedKit.complianceMetadata,
+      },
+      message: 'Compliance check completed successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get(':id/compliance')
+  async getKitCompliance(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
+    const kit = await this.userKitsService.getUserKit(user.uid, id);
+    if (!kit.isOshaKit) {
+      return {
+        success: false,
+        error: {
+          code: 'NOT_OSHA_KIT',
+          message: 'This kit is not designated as an OSHA kit',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        complianceStatus: kit.complianceStatus,
+        complianceScore: kit.complianceScore,
+        lastComplianceCheckAt: kit.lastComplianceCheckAt,
+        complianceMetadata: kit.complianceMetadata,
+        oshaKitType: kit.oshaKitType,
+        oshaRuleId: kit.oshaRuleId,
+      },
+      message: 'Compliance status retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Delete(':id')
   async deleteUserKit(
     @CurrentUser() user: { uid: string },
@@ -426,12 +497,14 @@ export class PublicTemplatesController {
 
   @Get()
   async getPublicTemplates(
+    @CurrentUser() user: { uid: string },
     @Query('purpose') purpose?: string,
     @Query('skillLevel') skillLevel?: string,
   ) {
     const templates = await this.publicTemplatesService.getPublicTemplates(
       purpose,
       skillLevel,
+      user?.uid,
     );
     return {
       success: true,
@@ -443,6 +516,7 @@ export class PublicTemplatesController {
 
   @Get(':id/items')
   async getPublicTemplateItems(
+    @CurrentUser() user: { uid: string },
     @Param('id') id: string,
     @Query('peopleCount') peopleCount?: string,
   ) {
@@ -452,6 +526,7 @@ export class PublicTemplatesController {
     const items = await this.publicTemplatesService.getPublicTemplateItems(
       id,
       selectedPeopleCount,
+      user?.uid,
     );
     return {
       success: true,

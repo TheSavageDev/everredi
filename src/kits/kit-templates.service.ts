@@ -16,6 +16,7 @@ export interface KitTemplate {
   isPublic: boolean;
   isAiGenerated: boolean;
   aiPrompt?: string;
+  requiresPremium?: boolean;
   defaultPeopleCount?: number; // Default: 1
   peopleCountOptions?: number[]; // e.g., [2, 4, 8] - additional options beyond default
   createdAt: Date;
@@ -36,6 +37,7 @@ function rowToKitTemplate(row: any): KitTemplate {
     isPublic: row.is_public,
     isAiGenerated: row.is_ai_generated,
     aiPrompt: row.ai_prompt,
+    requiresPremium: row.requires_premium || false,
     defaultPeopleCount: row.default_people_count,
     peopleCountOptions: row.people_count_options,
     createdAt: new Date(row.created_at),
@@ -102,6 +104,7 @@ export class KitTemplatesService {
         is_public: templateData.isPublic,
         is_ai_generated: templateData.isAiGenerated,
         ai_prompt: templateData.aiPrompt,
+        requires_premium: templateData.requiresPremium || false,
         default_people_count: templateData.defaultPeopleCount ?? 1,
         people_count_options: templateData.peopleCountOptions,
         created_at: now.toISOString(),
@@ -170,6 +173,7 @@ export class KitTemplatesService {
     if (updates.isPublic !== undefined) updateData.is_public = updates.isPublic;
     if (updates.isAiGenerated !== undefined) updateData.is_ai_generated = updates.isAiGenerated;
     if (updates.aiPrompt !== undefined) updateData.ai_prompt = updates.aiPrompt;
+    if (updates.requiresPremium !== undefined) updateData.requires_premium = updates.requiresPremium;
     if (updates.defaultPeopleCount !== undefined) updateData.default_people_count = updates.defaultPeopleCount;
     if (updates.peopleCountOptions !== undefined) updateData.people_count_options = updates.peopleCountOptions;
 

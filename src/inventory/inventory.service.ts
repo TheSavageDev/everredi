@@ -4,11 +4,13 @@ import {
   Inject,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { UserKitsService } from '../kits/user-kits.service';
 
 const logger = new Logger('InventoryService');
 
@@ -71,6 +73,8 @@ export class InventoryService {
     @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
     private readonly tenantsService: TenantsService,
+    @Inject(forwardRef(() => UserKitsService))
+    private readonly userKitsService?: UserKitsService,
   ) {}
 
   /**
@@ -388,12 +392,26 @@ export class InventoryService {
     }
 
     // Return in old format for backward compatibility
-    return {
+    const result = {
       ...rowToInventoryItem(inventoryItem),
       quantity: itemData.quantity,
       expirationDate,
       purchaseDate,
     };
+
+    // If item belongs to a kit, check if it's an OSHA kit and recalculate compliance
+    if (kitId && this.userKitsService) {
+      try {
+        await this.userKitsService.recalculateCompliance(userId, kitId);
+      } catch (error) {
+        logger.warn(
+          `Failed to recalculate compliance after creating inventory item: ${error}`,
+        );
+        // Don't fail item creation if compliance check fails
+      }
+    }
+
+    return result;
   }
 
   async updateInventoryItem(
@@ -497,13 +515,38 @@ export class InventoryService {
       throw new Error(`Failed to update inventory item: ${error.message}`);
     }
 
-    return rowToInventoryItem(data);
+    const result = rowToInventoryItem(data);
+
+    // If item belongs to a kit, check if it's an OSHA kit and recalculate compliance
+    const kitId = data.kit_id || currentItem.kit_id;
+    if (kitId && this.userKitsService) {
+      try {
+        await this.userKitsService.recalculateCompliance(userId, kitId);
+      } catch (error) {
+        logger.warn(
+          `Failed to recalculate compliance after updating inventory item: ${error}`,
+        );
+        // Don't fail item update if compliance check fails
+      }
+    }
+
+    return result;
   }
 
   async deleteInventoryItem(userId: string, itemId: string): Promise<void> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
     
+    // Get the item first to check if it belongs to a kit
+    const { data: item, error: fetchError } = await this.supabase
+      .from('inventory_items')
+      .select('kit_id')
+      .eq('id', itemId)
+      .eq('tenant_id', tenant.id)
+      .single();
+
+    const kitId = item?.kit_id;
+
     const { error } = await this.supabase
       .from('inventory_items')
       .delete()
@@ -515,6 +558,18 @@ export class InventoryService {
         throw new NotFoundException('Inventory item not found');
       }
       throw new Error(`Failed to delete inventory item: ${error.message}`);
+    }
+
+    // If item belonged to a kit, check if it's an OSHA kit and recalculate compliance
+    if (kitId && this.userKitsService) {
+      try {
+        await this.userKitsService.recalculateCompliance(userId, kitId);
+      } catch (error) {
+        logger.warn(
+          `Failed to recalculate compliance after deleting inventory item: ${error}`,
+        );
+        // Don't fail item deletion if compliance check fails
+      }
     }
   }
 

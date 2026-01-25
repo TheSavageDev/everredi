@@ -13,6 +13,7 @@ import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { ComplianceService } from '../compliance/compliance.service';
 
 export interface UserKit {
   id: string;
@@ -24,6 +25,25 @@ export interface UserKit {
   locationName?: string;
   status: 'active' | 'incomplete' | 'complete' | 'archived';
   notes?: string;
+  isOshaKit?: boolean;
+  oshaKitType?: string;
+  oshaRuleId?: string;
+  complianceStatus?: 'compliant' | 'non_compliant' | 'partial' | 'not_checked';
+  complianceScore?: number;
+  lastComplianceCheckAt?: Date;
+  complianceMetadata?: {
+    missingItems?: Array<{
+      supplyId: string;
+      supplyName: string;
+      requiredQuantity: number;
+      actualQuantity: number;
+    }>;
+    extraItems?: Array<{
+      supplyId: string;
+      supplyName: string;
+      quantity: number;
+    }>;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +74,15 @@ function rowToUserKit(row: any): UserKit {
     locationName: row.location_name,
     status: row.status,
     notes: row.notes,
+    isOshaKit: row.is_osha_kit || false,
+    oshaKitType: row.osha_kit_type,
+    oshaRuleId: row.osha_rule_id,
+    complianceStatus: row.compliance_status || 'not_checked',
+    complianceScore: row.compliance_score,
+    lastComplianceCheckAt: row.last_compliance_check_at
+      ? new Date(row.last_compliance_check_at)
+      : undefined,
+    complianceMetadata: row.compliance_metadata,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -110,6 +139,8 @@ export class UserKitsService {
     private readonly inventoryService: InventoryService,
     private readonly usersService: UsersService,
     private readonly tenantsService: TenantsService,
+    @Inject(forwardRef(() => ComplianceService))
+    private readonly complianceService: ComplianceService,
   ) {}
 
   async getUserKits(userId: string): Promise<UserKit[]> {
@@ -120,7 +151,7 @@ export class UserKitsService {
     const { data: kitsData, error } = await this.supabase
       .from('kits')
       .select(
-        'id, name, location_id, status, notes, metadata, created_at, updated_at, locations(name)',
+        'id, name, location_id, status, notes, metadata, created_at, updated_at, is_osha_kit, osha_kit_type, osha_rule_id, compliance_status, compliance_score, last_compliance_check_at, compliance_metadata, locations(name)',
       )
       .eq('tenant_id', tenant.id)
       .is('deleted_at', null);
@@ -130,20 +161,14 @@ export class UserKitsService {
     }
 
     // Map kits to UserKit format
-    return (kitsData || []).map((kit: any) => ({
-      id: kit.id,
-      userId: userId,
-      name: kit.name,
-      locationId: kit.location_id || '',
-      locationName: Array.isArray(kit.locations)
+    return (kitsData || []).map((kit: any) => rowToUserKit({
+      ...kit,
+      user_id: userId,
+      kit_template_id: (kit.metadata as any)?.kit_template_id,
+      kit_template_name: (kit.metadata as any)?.kit_template_name,
+      location_name: Array.isArray(kit.locations)
         ? kit.locations[0]?.name
         : (kit.locations as any)?.name,
-      status: kit.status === 'archived' ? 'archived' : 'active',
-      notes: kit.notes || undefined,
-      kitTemplateId: (kit.metadata as any)?.kit_template_id,
-      kitTemplateName: (kit.metadata as any)?.kit_template_name,
-      createdAt: new Date(kit.created_at),
-      updatedAt: new Date(kit.updated_at),
     }));
   }
 
@@ -163,7 +188,7 @@ export class UserKitsService {
     const { data: kit, error: kitError } = await this.supabase
       .from('kits')
       .select(
-        'id, name, location_id, status, notes, metadata, created_at, updated_at, locations(name)',
+        'id, name, location_id, status, notes, metadata, created_at, updated_at, is_osha_kit, osha_kit_type, osha_rule_id, compliance_status, compliance_score, last_compliance_check_at, compliance_metadata, locations(name)',
       )
       .eq('id', kitId.trim())
       .eq('tenant_id', tenant.id)
@@ -171,21 +196,15 @@ export class UserKitsService {
       .single();
 
     if (!kitError && kit) {
-      return {
-        id: kit.id,
-        userId: userId,
-        name: kit.name,
-        locationId: kit.location_id || '',
-        locationName: Array.isArray(kit.locations)
+      return rowToUserKit({
+        ...kit,
+        user_id: userId,
+        kit_template_id: (kit.metadata as any)?.kit_template_id,
+        kit_template_name: (kit.metadata as any)?.kit_template_name,
+        location_name: Array.isArray(kit.locations)
           ? kit.locations[0]?.name
           : (kit.locations as any)?.name,
-        status: kit.status === 'archived' ? 'archived' : 'active',
-        notes: kit.notes || undefined,
-        kitTemplateId: (kit.metadata as any)?.kit_template_id,
-        kitTemplateName: (kit.metadata as any)?.kit_template_name,
-        createdAt: new Date(kit.created_at),
-        updatedAt: new Date(kit.updated_at),
-      };
+      });
     }
 
     // If not found, check if it's shared with this user using kit_acl
@@ -206,21 +225,15 @@ export class UserKitsService {
         .single();
 
       if (!sharedKitError && sharedKit) {
-        return {
-          id: sharedKit.id,
-          userId: userId,
-          name: sharedKit.name,
-          locationId: sharedKit.location_id || '',
-          locationName: Array.isArray(sharedKit.locations)
+        return rowToUserKit({
+          ...sharedKit,
+          user_id: userId,
+          kit_template_id: (sharedKit.metadata as any)?.kit_template_id,
+          kit_template_name: (sharedKit.metadata as any)?.kit_template_name,
+          location_name: Array.isArray(sharedKit.locations)
             ? sharedKit.locations[0]?.name
             : (sharedKit.locations as any)?.name,
-          status: sharedKit.status === 'archived' ? 'archived' : 'active',
-          notes: sharedKit.notes || undefined,
-          kitTemplateId: (sharedKit.metadata as any)?.kit_template_id,
-          kitTemplateName: (sharedKit.metadata as any)?.kit_template_name,
-          createdAt: new Date(sharedKit.created_at),
-          updatedAt: new Date(sharedKit.updated_at),
-        };
+        });
       }
     }
 
@@ -258,28 +271,53 @@ export class UserKitsService {
       }
     }
 
+    // Premium check for OSHA kit designation
+    if (kitData.isOshaKit) {
+      const isPremium = await this.usersService.isPremiumUser(userId);
+      if (!isPremium) {
+        throw new ForbiddenException({
+          code: 'PREMIUM_REQUIRED',
+          message:
+            'OSHA compliance features require a premium subscription. Upgrade to premium to designate kits as OSHA-compliant.',
+        });
+      }
+    }
+
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
 
     const now = new Date();
 
+    const insertData: any = {
+      tenant_id: tenant.id,
+      name: kitData.name,
+      location_id: kitData.locationId,
+      status: kitData.status === 'archived' ? 'archived' : 'active',
+      notes: kitData.notes,
+      metadata: kitData.kitTemplateId
+        ? {
+            kit_template_id: kitData.kitTemplateId,
+            kit_template_name: kitData.kitTemplateName,
+          }
+        : null,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+
+    // Add OSHA fields if provided
+    if (kitData.isOshaKit !== undefined) {
+      insertData.is_osha_kit = kitData.isOshaKit;
+    }
+    if (kitData.oshaKitType) {
+      insertData.osha_kit_type = kitData.oshaKitType;
+    }
+    if (kitData.oshaRuleId) {
+      insertData.osha_rule_id = kitData.oshaRuleId;
+    }
+
     const { data, error } = await this.supabase
       .from('kits')
-      .insert({
-        tenant_id: tenant.id,
-        name: kitData.name,
-        location_id: kitData.locationId,
-        status: kitData.status === 'archived' ? 'archived' : 'active',
-        notes: kitData.notes,
-        metadata: kitData.kitTemplateId
-          ? {
-              kit_template_id: kitData.kitTemplateId,
-              kit_template_name: kitData.kitTemplateName,
-            }
-          : null,
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -287,20 +325,26 @@ export class UserKitsService {
       throw new Error(`Failed to create user kit: ${error.message}`);
     }
 
+    // If OSHA kit, trigger compliance check
+    if (kitData.isOshaKit && kitData.oshaKitType) {
+      try {
+        await this.recalculateCompliance(userId, data.id, kitData.oshaKitType);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to calculate compliance for new OSHA kit ${data.id}: ${error}`,
+        );
+        // Don't fail kit creation if compliance check fails
+      }
+    }
+
     // Convert kits row to UserKit format
-    return {
-      id: data.id,
-      userId: userId,
-      name: data.name,
-      locationId: data.location_id || '',
-      locationName: kitData.locationName,
-      status: data.status === 'archived' ? 'archived' : 'active',
-      notes: data.notes || undefined,
-      kitTemplateId: (data.metadata as any)?.kit_template_id,
-      kitTemplateName: (data.metadata as any)?.kit_template_name,
-      createdAt: new Date(data.created_at),
-      updatedAt: new Date(data.updated_at),
-    };
+    return rowToUserKit({
+      ...data,
+      user_id: userId,
+      kit_template_id: (data.metadata as any)?.kit_template_id,
+      kit_template_name: (data.metadata as any)?.kit_template_name,
+      location_name: kitData.locationName,
+    });
   }
 
   async createUserKitFromTemplate(
@@ -317,15 +361,47 @@ export class UserKitsService {
       notes?: string;
     }>,
   ): Promise<UserKit> {
+    // Check if template is an OSHA template by checking template purpose
+    // OSHA templates have purposes like 'osha-class-a', 'osha-class-b', etc.
+    const { data: template } = await this.supabase
+      .from('kit_templates')
+      .select('purpose, requires_premium')
+      .eq('id', templateId)
+      .single();
+
+    let oshaKitType: string | undefined;
+    if (template?.purpose?.startsWith('osha-')) {
+      // Map template purpose to OSHA kit type
+      const purposeMap: Record<string, string> = {
+        'osha-class-a': 'class_a',
+        'osha-class-b': 'class_b',
+        'osha-construction': 'construction',
+        'osha-general-industry': 'general_industry',
+        'osha-healthcare': 'healthcare',
+        'osha-food-service': 'food_service',
+        'osha-warehouse': 'warehouse',
+        'osha-manufacturing': 'manufacturing',
+      };
+      oshaKitType = purposeMap[template.purpose] || template.purpose.replace('osha-', '');
+    }
+
     // Create the kit
-    const kit = await this.createUserKit(userId, {
+    const kitData: Omit<UserKit, 'id' | 'userId' | 'createdAt' | 'updatedAt'> = {
       kitTemplateId: templateId,
       kitTemplateName: templateName,
       name: templateName,
       locationId,
       locationName,
       status: 'active',
-    });
+    };
+
+    // If it's an OSHA template, set OSHA fields (premium check happens in createUserKit)
+    if (oshaKitType) {
+      kitData.isOshaKit = true;
+      kitData.oshaKitType = oshaKitType;
+    }
+
+    const kit = await this.createUserKit(userId, kitData);
 
     // Always create item instances if templateItems are provided
     if (templateItems && templateItems.length > 0) {
@@ -587,6 +663,26 @@ export class UserKitsService {
       throw new NotFoundException('User kit not found');
     }
 
+    // Premium check for OSHA kit designation
+    const isBecomingOshaKit =
+      updates.isOshaKit === true && !currentKit.is_osha_kit;
+    const isChangingOshaType =
+      updates.isOshaKit !== false &&
+      (updates.oshaKitType !== undefined ||
+        updates.isOshaKit === true ||
+        currentKit.is_osha_kit);
+
+    if (isBecomingOshaKit || isChangingOshaType) {
+      const isPremium = await this.usersService.isPremiumUser(userId);
+      if (!isPremium) {
+        throw new ForbiddenException({
+          code: 'PREMIUM_REQUIRED',
+          message:
+            'OSHA compliance features require a premium subscription. Upgrade to premium to designate kits as OSHA-compliant.',
+        });
+      }
+    }
+
     // Prepare update data
     const updateData: any = {
       updated_at: new Date().toISOString(),
@@ -599,6 +695,27 @@ export class UserKitsService {
       updateData.status = updates.status === 'archived' ? 'archived' : 'active';
     }
     if (updates.notes !== undefined) updateData.notes = updates.notes;
+
+    // Handle OSHA fields
+    if (updates.isOshaKit !== undefined) {
+      updateData.is_osha_kit = updates.isOshaKit;
+      // If disabling OSHA, clear related fields
+      if (!updates.isOshaKit) {
+        updateData.osha_kit_type = null;
+        updateData.osha_rule_id = null;
+        updateData.compliance_status = 'not_checked';
+        updateData.compliance_score = null;
+        updateData.last_compliance_check_at = null;
+        updateData.compliance_metadata = null;
+      }
+    }
+    if (updates.oshaKitType !== undefined) {
+      updateData.osha_kit_type = updates.oshaKitType;
+    }
+    if (updates.oshaRuleId !== undefined) {
+      updateData.osha_rule_id = updates.oshaRuleId;
+    }
+
     if (
       updates.kitTemplateId !== undefined ||
       updates.kitTemplateName !== undefined
@@ -621,7 +738,7 @@ export class UserKitsService {
       .eq('id', kitId)
       .eq('tenant_id', tenant.id)
       .select(
-        'id, name, location_id, status, notes, metadata, created_at, updated_at, locations(name)',
+        'id, name, location_id, status, notes, metadata, created_at, updated_at, is_osha_kit, osha_kit_type, osha_rule_id, compliance_status, compliance_score, last_compliance_check_at, compliance_metadata, locations(name)',
       )
       .single();
 
@@ -629,29 +746,56 @@ export class UserKitsService {
       throw new Error(`Failed to update user kit: ${updateError.message}`);
     }
 
-    const currentKitData = {
-      id: currentKit.id,
-      userId: userId,
-      name: currentKit.name,
-      locationId: currentKit.location_id || '',
-      locationName: (currentKit as any).locations?.name,
-      status: currentKit.status === 'archived' ? 'archived' : 'active',
-      notes: currentKit.notes || undefined,
-      kitTemplateId: (currentKit.metadata as any)?.kit_template_id,
-      kitTemplateName: (currentKit.metadata as any)?.kit_template_name,
-      createdAt: new Date(currentKit.created_at),
-      updatedAt: new Date(currentKit.updated_at),
-    };
+    // If OSHA kit designation changed or type changed, recalculate compliance
+    const oshaStatusChanged =
+      updates.isOshaKit !== undefined &&
+      updates.isOshaKit !== currentKit.is_osha_kit;
+    const oshaTypeChanged =
+      updates.oshaKitType !== undefined &&
+      updates.oshaKitType !== currentKit.osha_kit_type;
+
+    if (
+      (oshaStatusChanged && updates.isOshaKit) ||
+      (oshaTypeChanged && (updatedKit.is_osha_kit || updates.isOshaKit))
+    ) {
+      const oshaKitType =
+        updates.oshaKitType || updatedKit.osha_kit_type || currentKit.osha_kit_type;
+      if (oshaKitType) {
+        try {
+          await this.recalculateCompliance(userId, kitId, oshaKitType);
+          // Reload kit to get updated compliance data
+          const { data: reloadedKit } = await this.supabase
+            .from('kits')
+            .select(
+              'id, name, location_id, status, notes, metadata, created_at, updated_at, is_osha_kit, osha_kit_type, osha_rule_id, compliance_status, compliance_score, last_compliance_check_at, compliance_metadata, locations(name)',
+            )
+            .eq('id', kitId)
+            .single();
+          if (reloadedKit) {
+            updatedKit.compliance_status = reloadedKit.compliance_status;
+            updatedKit.compliance_score = reloadedKit.compliance_score;
+            updatedKit.last_compliance_check_at = reloadedKit.last_compliance_check_at;
+            updatedKit.compliance_metadata = reloadedKit.compliance_metadata;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to calculate compliance for updated OSHA kit ${kitId}: ${error}`,
+          );
+          // Don't fail kit update if compliance check fails
+        }
+      }
+    }
+
 
     // If location or name changed, update associated inventory items
     const locationChanged =
       updates.locationId !== undefined &&
-      updates.locationId !== currentKitData.locationId;
+      updates.locationId !== currentKit.location_id;
     const nameChanged =
-      updates.name !== undefined && updates.name !== currentKitData.name;
+      updates.name !== undefined && updates.name !== currentKit.name;
     const locationNameChanged =
       updates.locationName !== undefined &&
-      updates.locationName !== currentKitData.locationName;
+      updates.locationName !== (currentKit as any).location_name;
 
     if (locationChanged || nameChanged || locationNameChanged) {
       try {
@@ -724,21 +868,67 @@ export class UserKitsService {
       }
     }
 
-    return {
-      id: updatedKit.id,
-      userId: userId,
-      name: updatedKit.name,
-      locationId: updatedKit.location_id || '',
-      locationName: Array.isArray(updatedKit.locations)
+    return rowToUserKit({
+      ...updatedKit,
+      user_id: userId,
+      kit_template_id: (updatedKit.metadata as any)?.kit_template_id,
+      kit_template_name: (updatedKit.metadata as any)?.kit_template_name,
+      location_name: Array.isArray(updatedKit.locations)
         ? updatedKit.locations[0]?.name
         : (updatedKit.locations as any)?.name,
-      status: updatedKit.status === 'archived' ? 'archived' : 'active',
-      notes: updatedKit.notes || undefined,
-      kitTemplateId: (updatedKit.metadata as any)?.kit_template_id,
-      kitTemplateName: (updatedKit.metadata as any)?.kit_template_name,
-      createdAt: new Date(updatedKit.created_at),
-      updatedAt: new Date(updatedKit.updated_at),
-    };
+    });
+  }
+
+  /**
+   * Recalculate compliance status for an OSHA kit
+   * Called automatically when kit items change or on-demand
+   */
+  async recalculateCompliance(
+    userId: string,
+    kitId: string,
+    oshaKitType?: string,
+  ): Promise<void> {
+    // Get kit to check if it's an OSHA kit
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const { data: kit, error: kitError } = await this.supabase
+      .from('kits')
+      .select('id, is_osha_kit, osha_kit_type, osha_rule_id')
+      .eq('id', kitId)
+      .eq('tenant_id', tenant.id)
+      .single();
+
+    if (kitError || !kit) {
+      this.logger.warn(`Kit ${kitId} not found for compliance recalculation`);
+      return;
+    }
+
+    if (!kit.is_osha_kit) {
+      // Not an OSHA kit, nothing to do
+      return;
+    }
+
+    const kitType = oshaKitType || kit.osha_kit_type;
+    if (!kitType) {
+      this.logger.warn(
+        `Cannot recalculate compliance for kit ${kitId}: no OSHA kit type specified`,
+      );
+      return;
+    }
+
+    try {
+      // Use ComplianceService to check compliance and update kit record
+      await this.complianceService.checkComplianceAndUpdateKit(
+        userId,
+        kitId,
+        kit.osha_rule_id || undefined,
+        kitType,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to recalculate compliance for kit ${kitId}: ${error}`,
+      );
+      throw error;
+    }
   }
 
   async deleteUserKit(userId: string, kitId: string): Promise<void> {

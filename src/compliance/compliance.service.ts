@@ -296,4 +296,233 @@ export class ComplianceService {
 
     return rowToComplianceCheck(data);
   }
+
+  /**
+   * Find OSHA rule by kit type (e.g., 'class_a', 'class_b', 'construction')
+   */
+  async findOshaRuleByType(
+    kitType: string,
+  ): Promise<OshaComplianceRule | null> {
+    // Map common kit types to industry values
+    const industryMap: Record<string, string> = {
+      class_a: 'class_a',
+      class_b: 'class_b',
+      construction: 'construction',
+      general_industry: 'general',
+      general: 'general',
+    };
+
+    const industry = industryMap[kitType.toLowerCase()] || kitType;
+
+    // Try to find by industry first
+    let { data, error } = await this.supabase
+      .from('osha_compliance_rules')
+      .select('*')
+      .eq('industry', industry)
+      .eq('is_active', true)
+      .limit(1)
+      .single();
+
+    // If not found, try searching by rule name containing the type
+    if (error || !data) {
+      const searchTerm = kitType.replace('_', ' ');
+      const { data: nameData, error: nameError } = await this.supabase
+        .from('osha_compliance_rules')
+        .select('*')
+        .ilike('rule_name', `%${searchTerm}%`)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+
+      if (!nameError && nameData) {
+        data = nameData;
+        error = null;
+      }
+    }
+
+    if (error || !data) {
+      return null;
+    }
+
+    return rowToOshaRule(data);
+  }
+
+  /**
+   * Check compliance and update kit record directly
+   * Used for automatic compliance updates on OSHA kits
+   */
+  async checkComplianceAndUpdateKit(
+    userId: string,
+    kitId: string,
+    oshaRuleId?: string,
+    oshaKitType?: string,
+  ): Promise<void> {
+    // Find the rule
+    let rule: OshaComplianceRule | null = null;
+
+    if (oshaRuleId) {
+      const { data, error } = await this.supabase
+        .from('osha_compliance_rules')
+        .select('*')
+        .eq('id', oshaRuleId)
+        .single();
+
+      if (!error && data) {
+        rule = rowToOshaRule(data);
+      }
+    } else if (oshaKitType) {
+      rule = await this.findOshaRuleByType(oshaKitType);
+    }
+
+    if (!rule) {
+      throw new NotFoundException(
+        `Compliance rule not found for kit type: ${oshaKitType || 'unknown'}`,
+      );
+    }
+
+    // Get kit items
+    const { data: kitItems, error: itemsError } = await this.supabase
+      .from('inventory_items')
+      .select(`
+        supply_id,
+        freeform_name,
+        is_requirement,
+        quantity,
+        inventory_lots(
+          quantity_units,
+          status,
+          expiration_date
+        )
+      `)
+      .eq('kit_id', kitId);
+
+    if (itemsError) {
+      throw new Error(`Failed to get kit items: ${itemsError.message}`);
+    }
+
+    // Check compliance
+    const missingItems: Array<{
+      supplyId: string;
+      supplyName: string;
+      requiredQuantity: number;
+      actualQuantity: number;
+    }> = [];
+    const extraItems: Array<{
+      supplyId: string;
+      supplyName: string;
+      quantity: number;
+    }> = [];
+
+    for (const required of rule.requiredSupplies) {
+      const kitItem = (kitItems || []).find(
+        (item: any) => item.supply_id === required.supplyId,
+      );
+
+      // Calculate actual quantity from inventory_lots
+      let actualQuantity = 0;
+      if (kitItem?.inventory_lots && Array.isArray(kitItem.inventory_lots)) {
+        actualQuantity = kitItem.inventory_lots
+          .filter(
+            (lot: any) =>
+              lot.status === 'active' &&
+              (!lot.expiration_date ||
+                new Date(lot.expiration_date) >= new Date()),
+          )
+          .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
+      } else if (kitItem && !kitItem.is_requirement) {
+        actualQuantity = kitItem.quantity || 0;
+      }
+
+      if (actualQuantity < required.quantity) {
+        missingItems.push({
+          supplyId: required.supplyId,
+          supplyName: required.supplyName || 'Unknown',
+          requiredQuantity: required.quantity,
+          actualQuantity,
+        });
+      }
+    }
+
+    // Calculate compliance score
+    const totalRequired = rule.requiredSupplies.reduce(
+      (sum, req) => sum + req.quantity,
+      0,
+    );
+    const totalActual = (kitItems || []).reduce(
+      (sum: number, item: any) => {
+        let actualQty = 0;
+        if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
+          actualQty = item.inventory_lots
+            .filter(
+              (lot: any) =>
+                lot.status === 'active' &&
+                (!lot.expiration_date ||
+                  new Date(lot.expiration_date) >= new Date()),
+            )
+            .reduce(
+              (lotSum: number, lot: any) => lotSum + (lot.quantity_units || 0),
+              0,
+            );
+        } else if (!item.is_requirement) {
+          actualQty = item.quantity || 0;
+        }
+        return sum + actualQty;
+      },
+      0,
+    );
+    const complianceScore = Math.min(
+      100,
+      Math.max(0, Math.round((totalActual / totalRequired) * 100)),
+    );
+
+    let complianceStatus: 'compliant' | 'non_compliant' | 'partial' | 'not_checked' =
+      'compliant';
+    if (complianceScore < 100) {
+      complianceStatus =
+        missingItems.length === rule.requiredSupplies.length
+          ? 'non_compliant'
+          : 'partial';
+    }
+
+    // Update kit record with compliance data
+    const now = new Date();
+    const { error: updateError } = await this.supabase
+      .from('kits')
+      .update({
+        compliance_status: complianceStatus,
+        compliance_score: complianceScore,
+        last_compliance_check_at: now.toISOString(),
+        compliance_metadata: {
+          missingItems,
+          extraItems,
+        },
+        osha_rule_id: rule.id,
+      })
+      .eq('id', kitId);
+
+    if (updateError) {
+      throw new Error(
+        `Failed to update kit compliance status: ${updateError.message}`,
+      );
+    }
+
+    // Also create a compliance check record for history
+    try {
+      await this.supabase.from('compliance_checks').insert({
+        user_id: userId,
+        kit_id: kitId,
+        osha_rule_id: rule.id,
+        osha_rule_name: rule.ruleName,
+        compliance_status: complianceStatus,
+        compliance_score: complianceScore,
+        missing_items: missingItems,
+        extra_items: extraItems,
+        checked_at: now.toISOString(),
+        created_at: now.toISOString(),
+      });
+    } catch (error) {
+      // Log but don't fail if compliance check record creation fails
+      console.warn('Failed to create compliance check record:', error);
+    }
+  }
 }

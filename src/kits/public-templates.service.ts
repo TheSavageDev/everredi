@@ -1,7 +1,8 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, ForbiddenException } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
+import { UsersService } from '../users/users.service';
 
 export interface PublicKitTemplate {
   id: string;
@@ -12,6 +13,7 @@ export interface PublicKitTemplate {
   environment?: string;
   skillLevel: 'beginner' | 'intermediate' | 'advanced';
   isActive: boolean;
+  requiresPremium?: boolean;
   createdBy?: string; // userId who created it, or 'system' for default templates
   publicTemplateId?: string; // Reference to user template if synced from user
   defaultPeopleCount?: number; // Default: 1
@@ -31,6 +33,7 @@ function rowToPublicTemplate(row: any): PublicKitTemplate {
     environment: row.environment,
     skillLevel: row.skill_level,
     isActive: row.is_active,
+    requiresPremium: row.requires_premium || false,
     createdBy: row.created_by,
     publicTemplateId: row.public_template_id,
     defaultPeopleCount: row.default_people_count,
@@ -44,11 +47,15 @@ function rowToPublicTemplate(row: any): PublicKitTemplate {
 export class PublicTemplatesService {
   private readonly logger = new Logger(PublicTemplatesService.name);
 
-  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
+  constructor(
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
+    private readonly usersService: UsersService,
+  ) {}
 
   async getPublicTemplates(
     purpose?: string,
     skillLevel?: string,
+    userId?: string,
   ): Promise<PublicKitTemplate[]> {
     let query = this.supabase
       .from('kit_templates')
@@ -72,10 +79,14 @@ export class PublicTemplatesService {
       throw new Error(`Failed to get public templates: ${error.message}`);
     }
 
+    // Return all templates (including premium) - users can see them but can't use them without premium
     return (data || []).map(rowToPublicTemplate);
   }
 
-  async getPublicTemplate(templateId: string): Promise<PublicKitTemplate> {
+  async getPublicTemplate(
+    templateId: string,
+    userId?: string,
+  ): Promise<PublicKitTemplate> {
     const { data, error } = await this.supabase
       .from('kit_templates')
       .select('*')
@@ -88,7 +99,21 @@ export class PublicTemplatesService {
       throw new NotFoundException('Public kit template not found');
     }
 
-    return rowToPublicTemplate(data);
+    const template = rowToPublicTemplate(data);
+
+    // Check premium requirement
+    if (template.requiresPremium && userId) {
+      const isPremium = await this.usersService.isPremiumUser(userId);
+      if (!isPremium) {
+        throw new ForbiddenException({
+          code: 'PREMIUM_REQUIRED',
+          message:
+            'This template requires a premium subscription. Upgrade to premium to access OSHA-compliant kit templates.',
+        });
+      }
+    }
+
+    return template;
   }
 
   async createPublicTemplate(
@@ -110,6 +135,7 @@ export class PublicTemplatesService {
         skill_level: templateData.skillLevel,
         is_public: true,
         is_active: templateData.isActive ?? true,
+        requires_premium: templateData.requiresPremium || false,
         created_by: templateData.createdBy,
         public_template_id: templateData.publicTemplateId,
         default_people_count: templateData.defaultPeopleCount ?? 1,
@@ -145,6 +171,8 @@ export class PublicTemplatesService {
       updateData.environment = updates.environment;
     if (updates.skillLevel !== undefined)
       updateData.skill_level = updates.skillLevel;
+    if (updates.requiresPremium !== undefined)
+      updateData.requires_premium = updates.requiresPremium;
     if (updates.defaultPeopleCount !== undefined)
       updateData.default_people_count = updates.defaultPeopleCount;
     if (updates.peopleCountOptions !== undefined)
@@ -234,6 +262,7 @@ export class PublicTemplatesService {
   async getPublicTemplateItems(
     templateId: string,
     selectedPeopleCount?: number,
+    userId?: string,
   ): Promise<
     Array<{
       supplyId: string;
@@ -253,6 +282,18 @@ export class PublicTemplatesService {
 
     if (templateError || !template) {
       throw new NotFoundException('Public kit template not found');
+    }
+
+    // Check premium requirement
+    if (template.requires_premium && userId) {
+      const isPremium = await this.usersService.isPremiumUser(userId);
+      if (!isPremium) {
+        throw new ForbiddenException({
+          code: 'PREMIUM_REQUIRED',
+          message:
+            'This template requires a premium subscription. Upgrade to premium to access OSHA-compliant kit templates.',
+        });
+      }
     }
 
     const templateData = rowToPublicTemplate(template);

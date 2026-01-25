@@ -1,30 +1,10 @@
 import { ComplianceService } from '../compliance.service';
-import type { firestore } from 'firebase-admin';
 import { UsersService } from '../../users/users.service';
+import { createSupabaseClientMock } from '../../../test/utils/supabase-client.mock';
+import { SUPABASE } from '../../config/supabase.provider';
 
 describe('ComplianceService', () => {
-  const firestoreMock = {
-    collection: jest.fn().mockReturnValue({
-      doc: jest.fn().mockReturnValue({
-        collection: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnThis(),
-          orderBy: jest.fn().mockReturnThis(),
-          limit: jest.fn().mockReturnThis(),
-          get: jest.fn().mockResolvedValue({
-            docs: [],
-          }),
-          add: jest.fn().mockResolvedValue({
-            id: 'check-1',
-            get: jest.fn().mockResolvedValue({
-              id: 'check-1',
-              data: () => ({}),
-            }),
-          }),
-        }),
-      }),
-    }),
-  } as unknown as firestore.Firestore;
-
+  const supabaseMock = createSupabaseClientMock();
   const usersServiceMock = {
     getUserById: jest.fn(),
   } as unknown as UsersService;
@@ -33,11 +13,16 @@ describe('ComplianceService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ComplianceService(firestoreMock, usersServiceMock);
+    (supabaseMock._clearAll as jest.Mock)();
+    service = new ComplianceService(supabaseMock, usersServiceMock);
   });
 
   it('returns an empty list of compliance checks for a new user', async () => {
+    // Mock empty compliance checks
+    (supabaseMock._setMockData as jest.Mock)('compliance_checks', []);
+    
     const checks = await service.getComplianceChecks('user-1');
     expect(Array.isArray(checks)).toBe(true);
+    expect(checks.length).toBe(0);
   });
 });

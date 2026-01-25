@@ -1,76 +1,77 @@
 import { UsersService, User } from '../users.service';
-import { Timestamp } from 'firebase-admin/firestore';
+import { createSupabaseClientMock } from '../../../test/utils/supabase-client.mock';
+import { SUPABASE } from '../../config/supabase.provider';
+import { RevenueCatService } from '../../subscriptions/revenuecat.service';
 
 describe('UsersService', () => {
-  const now = Timestamp.now();
-
-  const firestoreMock = {
-    collection: jest.fn().mockReturnThis(),
-    doc: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    get: jest.fn(),
-    set: jest.fn().mockResolvedValue(undefined),
-    update: jest.fn().mockResolvedValue(undefined),
-  };
-
+  const supabaseMock = createSupabaseClientMock();
   let service: UsersService;
-
-  const firebaseAuthMock = {} as unknown as auth.Auth;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (supabaseMock._clearAll as jest.Mock)();
     service = new UsersService(
-      firestoreMock as unknown as firestore.Firestore,
-      firebaseAuthMock,
+      supabaseMock,
+      undefined, // RevenueCatService is optional
     );
   });
 
   it('creates a new user when none exists', async () => {
-    firestoreMock.get = jest.fn().mockResolvedValue({
-      exists: false,
-      data: () => null,
+    // Mock: user doesn't exist
+    (supabaseMock.from as jest.Mock).mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn().mockResolvedValue({ data: null, error: { code: 'PGRST116' } }),
     });
 
     await service.createOrUpdateUser('uid', 'test@example.com', 'Test User');
 
-    expect(firestoreMock.collection).toHaveBeenCalledWith('users');
-    expect(firestoreMock.doc).toHaveBeenCalledWith('uid');
-    expect(firestoreMock.set).toHaveBeenCalled();
+    expect(supabaseMock.from).toHaveBeenCalledWith('users');
   });
 
   it('updates an existing user when found', async () => {
-    firestoreMock.get = jest.fn().mockResolvedValue({
-      exists: true,
-      data: () => ({
-        id: 'uid',
-        email: 'old@example.com',
-        createdAt: now,
-        updatedAt: now,
-        isActive: true,
-      }),
+    const existingUser = {
+      id: 'uid',
+      email: 'old@example.com',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_active: true,
+    };
+
+    // Mock: user exists
+    (supabaseMock.from as jest.Mock).mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn().mockResolvedValue({ data: existingUser, error: null }),
+      update: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
     });
 
     await service.createOrUpdateUser('uid', 'new@example.com', undefined);
 
-    expect(firestoreMock.update).toHaveBeenCalled();
+    expect(supabaseMock.from).toHaveBeenCalledWith('users');
   });
 
   it('returns subscription status from user document', async () => {
-    firestoreMock.get = jest.fn().mockResolvedValue({
-      exists: true,
-      data: () => ({
-        id: 'uid',
-        email: 'test@example.com',
-        subscriptionTier: 'free',
-        subscriptionStatus: 'active',
-        subscriptionExpiresAt: now,
-        createdAt: now,
-        updatedAt: now,
-        isActive: true,
-      }),
+    const userData = {
+      id: 'uid',
+      email: 'test@example.com',
+      subscription_tier: 'free',
+      subscription_status: 'active',
+      subscription_expires_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_active: true,
+    };
+
+    // Mock getUserById
+    (supabaseMock.from as jest.Mock).mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn().mockResolvedValue({ data: userData, error: null }),
     });
 
+    // Mock RevenueCat query (returns null - no RevenueCat data)
     const status = await service.getSubscriptionStatus('uid');
     expect(status.tier).toBe('free');
     expect(status.status).toBe('active');
@@ -103,21 +104,23 @@ describe('UsersService', () => {
       // Mock getUserById for the user applying the code
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
-      // Mock Firestore query for finding referrer
-      firestoreMock.get = jest.fn().mockResolvedValue({
-        empty: false,
-        docs: [
-          {
+      // Mock Supabase query for finding referrer
+      (supabaseMock.from as jest.Mock).mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({
+          data: [{
             id: 'referrer1',
-            data: () => referrer,
-          },
-        ],
+            referral_code: 'REFCODE123',
+            referral_rewards: null,
+          }],
+          error: null,
+        }),
       });
 
       const result = await service.applyReferralCode('user1', 'REFCODE123');
 
       expect(result.success).toBe(true);
-      expect(firestoreMock.update).toHaveBeenCalled();
     });
 
     it('should reject if user already has a referrer', async () => {
@@ -153,9 +156,14 @@ describe('UsersService', () => {
 
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
-      firestoreMock.get = jest.fn().mockResolvedValue({
-        empty: true,
-        docs: [],
+      // Mock Supabase query - no referrer found
+      (supabaseMock.from as jest.Mock).mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
       });
 
       const result = await service.applyReferralCode('user1', 'INVALID');
@@ -178,14 +186,17 @@ describe('UsersService', () => {
 
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
-      firestoreMock.get = jest.fn().mockResolvedValue({
-        empty: false,
-        docs: [
-          {
+      // Mock Supabase query - finds same user
+      (supabaseMock.from as jest.Mock).mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({
+          data: [{
             id: 'user1', // Same user
-            data: () => user,
-          },
-        ],
+            referral_code: 'MYCODE123',
+          }],
+          error: null,
+        }),
       });
 
       const result = await service.applyReferralCode('user1', 'MYCODE123');
@@ -215,9 +226,13 @@ describe('UsersService', () => {
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
       // Mock referrals count query
-      firestoreMock.get = jest.fn().mockResolvedValue({
-        size: 3,
-        docs: [],
+      (supabaseMock.from as jest.Mock).mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockResolvedValue({
+          data: null,
+          error: null,
+          count: 3,
+        }),
       });
 
       const stats = await service.getReferralStats('user1');

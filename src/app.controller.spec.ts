@@ -15,7 +15,7 @@ describe('AppController', () => {
         warnings: [],
       }),
       getConfigStatus: jest.fn().mockReturnValue({
-        firebase: { configured: true, projectId: 'test' },
+        supabase: { configured: true, url: 'https://test.supabase.co' },
         stripe: { configured: false },
         gemini: { configured: false },
       }),

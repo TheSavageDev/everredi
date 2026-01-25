@@ -5,7 +5,7 @@ This document describes how to deploy the Everredi backend to Google Cloud Run u
 ## Architecture
 
 - **Single GCP Project**: All environments (dev, staging, production) use the same GCP project
-- **Supabase Projects**: 
+- **Supabase Projects**:
   - **Dev/Test/Staging**: Share a single Supabase project (cost-effective for development)
   - **Production**: Separate Supabase project (isolated for production data)
 - **Cloud Run Services**: Separate Cloud Run services per environment
@@ -160,7 +160,6 @@ Create Supabase projects for your environments:
 4. Run the database migrations:
 
    **Option 1: Using Supabase SQL Editor (Recommended)**
-   
    1. Go to your Supabase project dashboard
    2. Navigate to SQL Editor
    3. Run the consolidated schema migration:
@@ -171,18 +170,18 @@ Create Supabase projects for your environments:
       - Copy contents of `api/migrations/001_seed_supply_catalog.sql`
       - Paste into SQL Editor
       - Execute
-   
+
    **Option 2: Using psql**
-   
+
    ```bash
    # Get connection string from Supabase Dashboard → Settings → Database
    # Run consolidated schema
    psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" -f api/migrations/000_consolidated_schema.sql
-   
+
    # Run seed catalog (optional but recommended)
    psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" -f api/migrations/001_seed_supply_catalog.sql
    ```
-   
+
    **Note**: The seed catalog (`001_seed_supply_catalog.sql`) is safe to run multiple times as it uses `ON CONFLICT DO NOTHING` to prevent duplicates.
 
 5. Configure OAuth providers in Supabase Dashboard → Authentication → Providers (Google, Apple, etc.)
@@ -230,8 +229,7 @@ echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secr
 Grant Cloud Run service account access to secrets:
 
 ```bash
-PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+SERVICE_ACCOUNT="924111630132-compute@developer.gserviceaccount.com"
 
 # Grant access to all environment secrets
 for env in dev staging prod; do

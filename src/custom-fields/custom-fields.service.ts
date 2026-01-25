@@ -170,6 +170,10 @@ export class CustomFieldsService {
       throw new Error(`Failed to update custom field: ${error.message}`);
     }
 
+    if (!data) {
+      throw new NotFoundException('Custom field not found');
+    }
+
     return rowToCustomField(data);
   }
 

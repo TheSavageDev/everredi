@@ -56,10 +56,8 @@ export function createSupabaseClientMock(): SupabaseClient {
       });
     }
 
-    // Handle count query
-    if (countOptions?.count && countOptions?.head) {
-      return { data: null, error: null, count: result.length };
-    }
+    // Handle count query - but only after applying filters
+    // We'll check this at the end after all filtering is done
 
     // Apply ordering
     if (orderBy) {
@@ -93,6 +91,11 @@ export function createSupabaseClientMock(): SupabaseClient {
       });
     }
 
+    // Handle count query with head option - return count only
+    if (countOptions?.count && countOptions?.head) {
+      return { data: null, error: null, count: result.length };
+    }
+
     // Handle single mode
     if (singleMode) {
       if (result.length === 0) {
@@ -122,79 +125,77 @@ export function createSupabaseClientMock(): SupabaseClient {
       selectFields: null as string[] | null,
     };
 
-    // Create builder methods that return the builder for chaining
-    // Use regular functions (not jest.fn) for chainable methods to ensure they return the builder correctly
+    // Create builder object with all methods defined
     const builder: any = {};
     
+    // Define all chainable methods - they all return builder for chaining
     builder.select = (fields?: string | string[], options?: { count?: 'exact' | 'estimated' | 'planned'; head?: boolean }) => {
-      state.selectFields = fields ? (Array.isArray(fields) ? fields : [fields]) : null;
-      // Store count options for later use
+      if (fields) {
+        if (Array.isArray(fields)) {
+          state.selectFields = fields;
+        } else if (typeof fields === 'string') {
+          // Handle comma-separated fields like 'id, referral_rewards'
+          state.selectFields = fields.split(',').map(f => f.trim());
+        } else {
+          state.selectFields = [fields];
+        }
+      } else {
+        state.selectFields = null;
+      }
       (state as any).countOptions = options;
       return builder;
     };
-    // Wrap in jest.fn for spy capabilities
-    builder.select = jest.fn(builder.select);
 
     builder.eq = (field: string, value: any) => {
       state.filters.push({ field, operator: 'eq', value });
       return builder;
     };
-    builder.eq = jest.fn(builder.eq);
 
     builder.limit = (count: number) => {
       state.limitCount = count;
       return builder;
     };
-    builder.limit = jest.fn(builder.limit);
 
     builder.neq = (field: string, value: any) => {
       state.filters.push({ field, operator: 'neq', value });
       return builder;
     };
-    builder.neq = jest.fn(builder.neq);
 
     builder.gt = (field: string, value: any) => {
       state.filters.push({ field, operator: 'gt', value });
       return builder;
     };
-    builder.gt = jest.fn(builder.gt);
 
     builder.gte = (field: string, value: any) => {
       state.filters.push({ field, operator: 'gte', value });
       return builder;
     };
-    builder.gte = jest.fn(builder.gte);
 
     builder.lt = (field: string, value: any) => {
       state.filters.push({ field, operator: 'lt', value });
       return builder;
     };
-    builder.lt = jest.fn(builder.lt);
 
     builder.lte = (field: string, value: any) => {
       state.filters.push({ field, operator: 'lte', value });
       return builder;
     };
-    builder.lte = jest.fn(builder.lte);
 
     builder.in = (field: string, values: any[]) => {
       state.filters.push({ field, operator: 'in', value: values });
       return builder;
     };
-    builder.in = jest.fn(builder.in);
 
     builder.order = (field: string, options?: { ascending?: boolean } | string) => {
       const ascending = typeof options === 'object' ? (options?.ascending !== false) : options !== 'desc';
       state.orderBy = { field, ascending };
       return builder;
     };
-    builder.order = jest.fn(builder.order);
 
     builder.single = () => {
       state.singleMode = true;
       return builder;
     };
-    builder.single = jest.fn(builder.single);
 
     builder.maybeSingle = () => {
       // maybeSingle doesn't throw error on no results, just returns null
@@ -202,7 +203,6 @@ export function createSupabaseClientMock(): SupabaseClient {
       state.singleMode = true;
       return builder;
     };
-    builder.maybeSingle = jest.fn(builder.maybeSingle);
 
     builder.insert = jest.fn((values: any) => {
         const insertData = Array.isArray(values) ? values : [values];
@@ -362,8 +362,19 @@ export function createSupabaseClientMock(): SupabaseClient {
             });
             setTableData(table, updatedData);
 
-            const result = state.singleMode ? (updatedRows[0] || null) : updatedRows;
-            const response = { data: result, error: null };
+            let result;
+            let error = null;
+            if (state.singleMode) {
+              if (updatedRows.length === 0) {
+                result = null;
+                error = { code: 'PGRST116', message: 'No rows returned' };
+              } else {
+                result = updatedRows[0];
+              }
+            } else {
+              result = updatedRows;
+            }
+            const response = { data: result, error };
             return Promise.resolve(response).then(onResolve);
           }),
           catch: jest.fn((onReject?: (error: any) => any) => {
@@ -475,8 +486,9 @@ export function createSupabaseClientMock(): SupabaseClient {
     return builder;
   };
 
+  const fromMock = jest.fn((table: string) => createQueryBuilder(table));
   const mockClient = {
-    from: jest.fn((table: string) => createQueryBuilder(table)),
+    from: fromMock,
     
     // Helper methods for test setup
     _setMockData: (table: string, data: any[]) => {
@@ -496,6 +508,8 @@ export function createSupabaseClientMock(): SupabaseClient {
     _clearAll: () => {
       mockData.clear();
       mockDocuments.clear();
+      // Ensure from method still works after clearing
+      fromMock.mockImplementation((table: string) => createQueryBuilder(table));
     },
   } as unknown as SupabaseClient;
 

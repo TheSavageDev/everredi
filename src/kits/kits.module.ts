@@ -9,11 +9,19 @@ import { UserKitsService } from './user-kits.service';
 import { PublicTemplatesService } from './public-templates.service';
 import { TemplateSeedService } from './template-seed.service';
 import { SuppliesModule } from '../supplies/supplies.module';
+import { SupplyCategoriesModule } from '../supply-categories/supply-categories.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { UsersModule } from '../users/users.module';
+import { TenantsModule } from '../tenants/tenants.module';
 
 @Module({
-  imports: [SuppliesModule, forwardRef(() => InventoryModule), UsersModule],
+  imports: [
+    SuppliesModule,
+    SupplyCategoriesModule,
+    forwardRef(() => InventoryModule),
+    UsersModule,
+    TenantsModule,
+  ],
   controllers: [KitsController, UserKitsController, PublicTemplatesController],
   providers: [
     KitTemplatesService,

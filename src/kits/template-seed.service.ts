@@ -1,10 +1,11 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 import { PublicTemplatesService } from './public-templates.service';
 import { KitTemplatesService } from './kit-templates.service';
 import { SuppliesService } from '../supplies/supplies.service';
+import { SupplyCategoriesService } from '../supply-categories/supply-categories.service';
+import type { SupplyCategory } from '../supply-categories/supply-categories.service';
 
 interface DefaultTemplate {
   name: string;
@@ -36,20 +37,22 @@ export class TemplateSeedService {
       environment: 'indoor',
       skillLevel: 'beginner',
       items: [
-        { supplyName: 'Adhesive Bandages', quantity: 20 },
+        { supplyName: 'Adhesive Bandages - Assorted Sizes', quantity: 20 },
         { supplyName: 'Gauze Pads', quantity: 10 },
+        { supplyName: 'Sterile Gauze Pads 4x4', quantity: 5 },
         { supplyName: 'Medical Tape', quantity: 1 },
         { supplyName: 'Antiseptic Wipes', quantity: 10 },
         { supplyName: 'Tweezers', quantity: 1 },
         { supplyName: 'Scissors', quantity: 1 },
         { supplyName: 'Disposable Gloves', quantity: 4 },
+        { supplyName: 'Antibiotic Ointment', quantity: 1 },
         { supplyName: 'Pain Relievers', quantity: 1 },
       ],
     },
     {
       name: 'Hiking/Outdoor Kit',
       description:
-        'Designed for outdoor adventures and hiking trips. Includes supplies for treating injuries in remote locations and handling outdoor-specific emergencies.',
+        'Designed for outdoor adventures and hiking trips. Includes supplies for treating injuries in remote locations and handling outdoor-specific emergencies, including advanced trauma care.',
       purpose: 'hiking',
       groupSize: 6,
       environment: 'outdoor',
@@ -57,6 +60,7 @@ export class TemplateSeedService {
       items: [
         { supplyName: 'Adhesive Bandages', quantity: 30 },
         { supplyName: 'Gauze Pads', quantity: 15 },
+        { supplyName: 'Sterile Gauze Pads 4x4', quantity: 10 },
         { supplyName: 'Medical Tape', quantity: 2 },
         { supplyName: 'Antiseptic Wipes', quantity: 20 },
         { supplyName: 'Tweezers', quantity: 1 },
@@ -64,6 +68,11 @@ export class TemplateSeedService {
         { supplyName: 'Disposable Gloves', quantity: 6 },
         { supplyName: 'Moleskin', quantity: 1, notes: 'For blisters' },
         { supplyName: 'Emergency Blanket', quantity: 1 },
+        { supplyName: 'Tourniquet', quantity: 1 },
+        { supplyName: 'QuikClot®', quantity: 1 },
+        { supplyName: 'Israeli Bandage', quantity: 1 },
+        { supplyName: 'Compressed Gauze', quantity: 2 },
+        { supplyName: 'SAM Splint', quantity: 1 },
         { supplyName: 'Pain Relievers', quantity: 1 },
         { supplyName: 'Antihistamine', quantity: 1 },
       ],
@@ -114,14 +123,15 @@ export class TemplateSeedService {
     {
       name: 'Workplace First Aid Kit',
       description:
-        'OSHA-compliant first aid kit designed for workplaces. Suitable for offices, warehouses, and other work environments.',
+        'OSHA-compliant first aid kit designed for workplaces. Suitable for offices, warehouses, and other work environments. Includes comprehensive supplies for workplace injuries.',
       purpose: 'workplace',
       groupSize: 20,
       environment: 'indoor',
       skillLevel: 'beginner',
       items: [
-        { supplyName: 'Adhesive Bandages', quantity: 100 },
+        { supplyName: 'Adhesive Bandages - Assorted Sizes', quantity: 100 },
         { supplyName: 'Gauze Pads', quantity: 40 },
+        { supplyName: 'Sterile Gauze Pads 4x4', quantity: 20 },
         { supplyName: 'Medical Tape', quantity: 4 },
         { supplyName: 'Antiseptic Wipes', quantity: 50 },
         { supplyName: 'Tweezers', quantity: 2 },
@@ -129,14 +139,16 @@ export class TemplateSeedService {
         { supplyName: 'Disposable Gloves', quantity: 20 },
         { supplyName: 'Eye Wash Solution', quantity: 1 },
         { supplyName: 'Burn Gel', quantity: 1 },
+        { supplyName: 'Antibiotic Ointment', quantity: 2 },
         { supplyName: 'Pain Relievers', quantity: 1 },
         { supplyName: 'CPR Face Shield', quantity: 1 },
+        { supplyName: 'Triangular Bandage', quantity: 2 },
       ],
     },
     {
       name: 'Sports/Activity Kit',
       description:
-        'Specialized first aid kit for sports activities, team events, and athletic competitions. Includes supplies for common sports injuries.',
+        'Specialized first aid kit for sports activities, team events, and athletic competitions. Includes supplies for common sports injuries and athletic training needs.',
       purpose: 'sports',
       groupSize: 10,
       environment: 'outdoor',
@@ -151,17 +163,128 @@ export class TemplateSeedService {
         { supplyName: 'Disposable Gloves', quantity: 10 },
         { supplyName: 'Ice Pack', quantity: 2 },
         { supplyName: 'Elastic Bandage', quantity: 2 },
+        { supplyName: 'Athletic Tape', quantity: 2 },
+        { supplyName: 'Pre-wrap', quantity: 2 },
+        { supplyName: 'Kinesiology Tape', quantity: 1 },
+        { supplyName: 'Compression Bandage', quantity: 2 },
+        { supplyName: 'Biofreeze', quantity: 1 },
+        { supplyName: 'Icy Hot', quantity: 1 },
         { supplyName: 'Pain Relievers', quantity: 1 },
         { supplyName: 'Antihistamine', quantity: 1 },
+      ],
+    },
+    {
+      name: 'Athletic Trainer Kit',
+      description:
+        'Comprehensive athletic training kit for sports medicine professionals. Includes specialized supplies for injury prevention, treatment, and rehabilitation for athletes and teams.',
+      purpose: 'athletic-training',
+      groupSize: 18,
+      environment: 'outdoor',
+      skillLevel: 'advanced',
+      items: [
+        { supplyName: 'Athletic Tape', quantity: 6 },
+        { supplyName: 'Pre-wrap', quantity: 6 },
+        { supplyName: 'Kinesiology Tape', quantity: 3 },
+        { supplyName: 'Sports Tape', quantity: 2 },
+        { supplyName: 'Foam Padding', quantity: 4 },
+        { supplyName: 'Heel and Lace Pads', quantity: 2 },
+        { supplyName: 'Athletic Trainer Scissors', quantity: 2 },
+        { supplyName: 'Ankle Brace', quantity: 2 },
+        { supplyName: 'Knee Brace', quantity: 2 },
+        { supplyName: 'Wrist Brace', quantity: 2 },
+        { supplyName: 'Elbow Brace', quantity: 1 },
+        { supplyName: 'Shoulder Brace', quantity: 1 },
+        { supplyName: 'Compression Sleeve', quantity: 3 },
+        { supplyName: 'Biofreeze', quantity: 2 },
+        { supplyName: 'Icy Hot', quantity: 2 },
+        { supplyName: 'Tiger Balm', quantity: 1 },
+        { supplyName: 'Instant Cold Pack', quantity: 6 },
+        { supplyName: 'Compression Bandage', quantity: 4 },
+        { supplyName: 'Elastic Bandage', quantity: 4 },
+        { supplyName: 'Sterile Gauze Pads 4x4', quantity: 20 },
+        { supplyName: 'Sterile Gauze Pads 2x2', quantity: 10 },
+        { supplyName: 'Antiseptic Wipes', quantity: 40 },
+        { supplyName: 'Disposable Gloves', quantity: 20 },
+        { supplyName: 'Cohesive Bandage (Coban)', quantity: 4 },
+        { supplyName: 'Pain Relievers', quantity: 1 },
+      ],
+    },
+    {
+      name: 'Advanced Medical/EMT Kit',
+      description:
+        'Professional-grade medical kit for EMTs, paramedics, and advanced medical responders. Includes advanced trauma care, airway management, monitoring equipment, and IV supplies.',
+      purpose: 'advanced-medical',
+      groupSize: 1,
+      environment: 'any',
+      skillLevel: 'advanced',
+      items: [
+        { supplyName: 'Tourniquet', quantity: 2 },
+        { supplyName: 'CAT Tourniquet', quantity: 1 },
+        { supplyName: 'Chest Seal', quantity: 2 },
+        { supplyName: 'Hemostatic Gauze', quantity: 2 },
+        { supplyName: 'QuikClot®', quantity: 2 },
+        { supplyName: 'QuikClot® Combat Gauze LE', quantity: 1 },
+        { supplyName: 'Israeli Bandage', quantity: 2 },
+        { supplyName: 'Compressed Gauze', quantity: 4 },
+        { supplyName: 'Abdominal Pad (ABD Pad)', quantity: 2 },
+        { supplyName: 'Nasal Airway', quantity: 2 },
+        { supplyName: 'Oral Airway', quantity: 2 },
+        { supplyName: 'Bag Valve Mask', quantity: 1 },
+        { supplyName: 'Stethoscope', quantity: 1 },
+        { supplyName: 'Pulse Oximeter', quantity: 1 },
+        { supplyName: 'Blood Pressure Cuff', quantity: 1 },
+        { supplyName: 'Penlight', quantity: 1 },
+        { supplyName: 'IV Catheter', quantity: 4 },
+        { supplyName: 'IV Administration Set', quantity: 2 },
+        { supplyName: 'Syringe', quantity: 6 },
+        { supplyName: 'Needle', quantity: 6 },
+        { supplyName: 'Alcohol Prep Pad', quantity: 20 },
+        { supplyName: 'Hemostat Curved 5.5"', quantity: 1 },
+        { supplyName: 'Hemostat Straight 5.5"', quantity: 1 },
+        { supplyName: 'Surgical Scalpel Blade', quantity: 2 },
+        { supplyName: 'Suture Removal Kit', quantity: 1 },
+        { supplyName: 'Tongue Depressor', quantity: 10 },
+        { supplyName: 'Cotton Swabs', quantity: 2 },
+        { supplyName: 'Irrigation Syringe', quantity: 2 },
+        { supplyName: 'XShear Trauma Shears', quantity: 1 },
+        { supplyName: 'N95 Respirator', quantity: 5 },
+        { supplyName: 'Gown', quantity: 2 },
+        { supplyName: 'Disposable Gloves', quantity: 20 },
+        { supplyName: 'Saline Solution', quantity: 2 },
+        { supplyName: 'Povidone-Iodine Solution', quantity: 1 },
+      ],
+    },
+    {
+      name: 'Travel First Aid Kit',
+      description:
+        'Compact, portable first aid kit designed for travel. Includes essential supplies in travel-friendly quantities for treating minor injuries while on the go.',
+      purpose: 'travel',
+      groupSize: 3,
+      environment: 'travel',
+      skillLevel: 'beginner',
+      items: [
+        { supplyName: 'Adhesive Bandages - Assorted Sizes', quantity: 15 },
+        { supplyName: 'Sterile Gauze Pads 4x4', quantity: 5 },
+        { supplyName: 'Medical Tape', quantity: 1 },
+        { supplyName: 'Antiseptic Wipes', quantity: 10 },
+        { supplyName: 'Tweezers', quantity: 1 },
+        { supplyName: 'Scissors', quantity: 1 },
+        { supplyName: 'Disposable Gloves', quantity: 2 },
+        { supplyName: 'Antibiotic Ointment', quantity: 1 },
+        { supplyName: 'Pain Relievers', quantity: 1 },
+        { supplyName: 'Antihistamine', quantity: 1 },
+        { supplyName: 'First Aid Guide', quantity: 1 },
+        { supplyName: 'Thermometer', quantity: 1 },
       ],
     },
   ];
 
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly publicTemplatesService: PublicTemplatesService,
     private readonly kitTemplatesService: KitTemplatesService,
     private readonly suppliesService: SuppliesService,
+    private readonly supplyCategoriesService: SupplyCategoriesService,
   ) {}
 
   async seedDefaultTemplates(
@@ -174,80 +297,65 @@ export class TemplateSeedService {
     this.logger.log('🌱 Starting to seed default kit templates...');
 
     // Ensure system user document exists
-    const systemUserRef = this.firestore
-      .collection('users')
-      .doc(SYSTEM_USER_ID);
-    const systemUserDoc = await systemUserRef.get();
-    if (!systemUserDoc.exists) {
-      const now = Timestamp.now();
-      await systemUserRef.set({
+    const { data: systemUser } = await this.supabase
+      .from('users')
+      .select('id')
+      .eq('id', SYSTEM_USER_ID)
+      .single();
+
+    if (!systemUser) {
+      const now = new Date();
+      const { error } = await this.supabase.from('users').insert({
         id: SYSTEM_USER_ID,
-        firebaseUid: SYSTEM_USER_ID,
         email: 'system@everredi.app',
-        displayName: 'System',
-        subscriptionTier: 'premium',
-        subscriptionStatus: 'active',
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
+        display_name: 'System',
+        subscription_tier: 'premium',
+        subscription_status: 'active',
+        is_active: true,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
       });
-      this.logger.log('✅ Created system user document');
+
+      if (error) {
+        this.logger.warn(`Could not create system user: ${error.message}`);
+      } else {
+        this.logger.log('✅ Created system user document');
+      }
     }
 
     for (const template of this.defaultTemplates) {
       try {
         // Check if template already exists by name
-        const existingTemplates = await this.firestore
-          .collection('publicKitTemplates')
-          .where('name', '==', template.name)
-          .where('isActive', '==', true)
-          .limit(1)
-          .get();
+        const { data: existingTemplates } = await this.supabase
+          .from('kit_templates')
+          .select('*')
+          .eq('name', template.name)
+          .eq('is_public', true)
+          .eq('is_active', true)
+          .limit(1);
 
-        if (!existingTemplates.empty) {
-          const existingTemplate = existingTemplates.docs[0];
-          const existingData = existingTemplate.data() as any;
+        if (existingTemplates && existingTemplates.length > 0) {
+          const existingTemplate = existingTemplates[0];
 
           // If force is true, or template doesn't have items, update it
-          if (force || !existingData.publicTemplateId) {
-            this.logger.log(
-              `🔄 ${force ? 'Force updating' : 'Updating'} "${template.name}" - ${!existingData.publicTemplateId ? 'missing items' : 'force reseed'}...`,
-            );
+          if (force) {
+            this.logger.log(`🔄 Force updating "${template.name}"...`);
 
             // Soft delete the existing template
-            await this.firestore
-              .collection('publicKitTemplates')
-              .doc(existingTemplate.id)
-              .update({ isActive: false });
+            await this.supabase
+              .from('kit_templates')
+              .update({ is_active: false })
+              .eq('id', existingTemplate.id);
 
-            // Delete old items if they exist
-            try {
-              const oldItemsSnapshot = await this.firestore
-                .collection('publicKitTemplates')
-                .doc(existingTemplate.id)
-                .collection('kitItems')
-                .get();
+            // Delete old revisions and their items (cascade will handle items)
+            await this.supabase
+              .from('kit_template_revisions')
+              .delete()
+              .eq('kit_template_id', existingTemplate.id);
 
-              if (!oldItemsSnapshot.empty) {
-                const deleteBatch = this.firestore.batch();
-                oldItemsSnapshot.docs.forEach((doc) => {
-                  deleteBatch.delete(doc.ref);
-                });
-                await deleteBatch.commit();
-                this.logger.log(
-                  `  Deleted ${oldItemsSnapshot.size} old items from template`,
-                );
-              }
-            } catch (error: any) {
-              this.logger.warn(
-                `  Could not delete old items: ${error.message}`,
-              );
-            }
-
-            // Continue to create new template below
             updated++;
           } else {
-            // Verify items actually exist in the public template
+            // Verify items actually exist
             try {
               const items =
                 await this.publicTemplatesService.getPublicTemplateItems(
@@ -257,12 +365,11 @@ export class TemplateSeedService {
                 this.logger.log(
                   `🔄 Updating "${template.name}" - exists but no items found`,
                 );
-                await this.firestore
-                  .collection('publicKitTemplates')
-                  .doc(existingTemplate.id)
-                  .update({ isActive: false });
+                await this.supabase
+                  .from('kit_templates')
+                  .update({ is_active: false })
+                  .eq('id', existingTemplate.id);
                 updated++;
-                // Continue to create new template below
               } else {
                 this.logger.log(
                   `⏭️  Skipping "${template.name}" - already exists with ${items.length} items`,
@@ -274,12 +381,11 @@ export class TemplateSeedService {
               this.logger.log(
                 `🔄 Updating "${template.name}" - error verifying items: ${error.message}`,
               );
-              await this.firestore
-                .collection('publicKitTemplates')
-                .doc(existingTemplate.id)
-                .update({ isActive: false });
+              await this.supabase
+                .from('kit_templates')
+                .update({ is_active: false })
+                .eq('id', existingTemplate.id);
               updated++;
-              // Continue to create new template below
             }
           }
         }
@@ -299,42 +405,10 @@ export class TemplateSeedService {
 
         this.logger.log(`  Created public template ${publicTemplate.id}`);
 
-        // Verify template document exists before adding items
-        const templateDocCheck = await this.firestore
-          .collection('publicKitTemplates')
-          .doc(publicTemplate.id)
-          .get();
-
-        if (!templateDocCheck.exists) {
-          throw new Error(
-            `Public template document ${publicTemplate.id} was not created!`,
-          );
-        }
-        this.logger.log(
-          `  ✅ Confirmed template document exists: publicKitTemplates/${publicTemplate.id}`,
-        );
-
-        // Add items directly to the public template
+        // Add items to the public template
         await this.addItemsToPublicTemplate(publicTemplate.id, template.items);
 
-        // Final verification - query directly from Firestore
-        const finalCheck = await this.firestore
-          .collection('publicKitTemplates')
-          .doc(publicTemplate.id)
-          .collection('kitItems')
-          .get();
-
-        this.logger.log(
-          `  🔍 Final database check: Found ${finalCheck.size} items in publicKitTemplates/${publicTemplate.id}/kitItems`,
-        );
-
-        if (finalCheck.empty) {
-          throw new Error(
-            `CRITICAL: Items were not saved! Template ${publicTemplate.id} has no items in database.`,
-          );
-        }
-
-        // Verify items were saved using the service method
+        // Verify items were saved
         const savedItems =
           await this.publicTemplatesService.getPublicTemplateItems(
             publicTemplate.id,
@@ -357,7 +431,6 @@ export class TemplateSeedService {
         this.logger.error(
           `❌ Failed to create "${template.name}":`,
           error.stack,
-          TemplateSeedService.name,
         );
       }
     }
@@ -369,121 +442,280 @@ export class TemplateSeedService {
     return { created, skipped, updated };
   }
 
+  private findCategoryForSupply(
+    supplyName: string,
+    categories: SupplyCategory[],
+  ): { id: string; name: string } {
+    const nameLower = supplyName.toLowerCase();
+
+    // Create a map of category names to IDs
+    const categoryMap = new Map<string, { id: string; name: string }>();
+    categories.forEach((cat) =>
+      categoryMap.set(cat.name.toLowerCase(), { id: cat.id, name: cat.name }),
+    );
+
+    // Keyword matching (order matters - more specific first)
+    if (
+      nameLower.includes('burn') ||
+      nameLower.includes('gel') ||
+      nameLower.includes('aloe')
+    ) {
+      return (
+        categoryMap.get('burn care') || { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('ice') ||
+      nameLower.includes('cold') ||
+      nameLower.includes('heat')
+    ) {
+      return (
+        categoryMap.get('cold & heat therapy') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('sanitizer') ||
+      nameLower.includes('wipes') ||
+      nameLower.includes('soap') ||
+      nameLower.includes('eye wash')
+    ) {
+      return (
+        categoryMap.get('hygiene & sanitation') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('gloves') ||
+      nameLower.includes('mask') ||
+      nameLower.includes('goggles') ||
+      nameLower.includes('shield') ||
+      nameLower.includes('cpr')
+    ) {
+      return (
+        categoryMap.get('personal protection') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('emergency') ||
+      nameLower.includes('blanket') ||
+      nameLower.includes('tourniquet') ||
+      nameLower.includes('splint')
+    ) {
+      return (
+        categoryMap.get('emergency & trauma') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('scissors') ||
+      nameLower.includes('tweezers') ||
+      nameLower.includes('thermometer') ||
+      nameLower.includes('flashlight')
+    ) {
+      return (
+        categoryMap.get('tools & instruments') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('pain') ||
+      nameLower.includes('reliever') ||
+      nameLower.includes('medication') ||
+      nameLower.includes('antihistamine') ||
+      nameLower.includes('antiseptic') ||
+      nameLower.includes('antibiotic') ||
+      nameLower.includes('hydrogen') ||
+      nameLower.includes('peroxide')
+    ) {
+      return (
+        categoryMap.get('medications & ointments') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+    if (
+      nameLower.includes('bandage') ||
+      nameLower.includes('gauze') ||
+      nameLower.includes('tape') ||
+      nameLower.includes('dressing') ||
+      nameLower.includes('moleskin') ||
+      nameLower.includes('elastic')
+    ) {
+      return (
+        categoryMap.get('bandages & wound care') ||
+        { id: categories[0].id, name: categories[0].name }
+      );
+    }
+
+    // Default fallback to first category
+    return { id: categories[0].id, name: categories[0].name };
+  }
+
   private async addItemsToPublicTemplate(
     publicTemplateId: string,
     items: Array<{ supplyName: string; quantity: number; notes?: string }>,
   ): Promise<void> {
-    const templateRef = this.firestore
-      .collection('publicKitTemplates')
-      .doc(publicTemplateId);
-
-    // Verify template document exists
-    const templateDoc = await templateRef.get();
-    if (!templateDoc.exists) {
-      throw new Error(
-        `Public template document ${publicTemplateId} does not exist`,
-      );
-    }
     this.logger.log(
       `  Template document ${publicTemplateId} exists, adding ${items.length} items...`,
     );
 
-    const now = Timestamp.now();
-    const batch = this.firestore.batch();
+    // Create a revision for this template (version 1)
+    // Note: created_by is NULL for system templates since SYSTEM_USER_ID is a string, not a UUID
+    const now = new Date();
+    const { data: revision, error: revisionError } = await this.supabase
+      .from('kit_template_revisions')
+      .insert({
+        kit_template_id: publicTemplateId,
+        version: 1,
+        created_by: null, // NULL for system-created templates
+        created_at: now.toISOString(),
+      })
+      .select()
+      .single();
 
-    // Try to find supplies by name, fallback to using name as supplyId
-    const allSupplies = await this.suppliesService.getSupplies();
+    if (revisionError || !revision) {
+      this.logger.error(
+        `  ❌ Failed to create revision for template ${publicTemplateId}: ${revisionError?.message}`,
+      );
+      throw new Error(
+        `Failed to create revision for template ${publicTemplateId}: ${revisionError?.message}`,
+      );
+    }
+
+    this.logger.log(`  Created revision ${revision.id} (version 1) for template ${publicTemplateId}`);
+
+    // Get all supplies and categories
+    // System user should see all supplies (premium access)
+    const allSupplies = await this.suppliesService.getSupplies(SYSTEM_USER_ID, true);
+    const allCategories = await this.supplyCategoriesService.getCategories();
     const supplyMap = new Map<string, string>();
     allSupplies.forEach((supply) => {
       supplyMap.set(supply.name.toLowerCase(), supply.id);
     });
 
-    items.forEach((item, index) => {
-      // Create a new document reference for each item
-      const itemRef = templateRef.collection('kitItems').doc();
-      const supplyId =
-        supplyMap.get(item.supplyName.toLowerCase()) || item.supplyName; // Use name as fallback
+    // Process all items, creating supplies if they don't exist
+    const revisionItems = await Promise.all(
+      items.map(async (item, index) => {
+        let supplyId = supplyMap.get(item.supplyName.toLowerCase());
 
-      const itemData: any = {
-        publicTemplateId: publicTemplateId,
-        supplyId,
-        supplyName: item.supplyName,
-        quantity: item.quantity,
-        isRequired: true,
-        sortOrder: index,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      // Only include notes if it's defined
-      if (item.notes) {
-        itemData.notes = item.notes;
-      }
-
-      this.logger.log(
-        `    Adding item ${index + 1}/${items.length}: ${item.supplyName} (qty: ${item.quantity}, supplyId: ${supplyId})`,
-      );
-      batch.set(itemRef, itemData);
-    });
-
-    try {
-      this.logger.log(`  Committing batch with ${items.length} items...`);
-      await batch.commit();
-      this.logger.log(`  ✅ Batch committed successfully`);
-
-      // Wait a moment for Firestore to propagate
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Verify items were actually written by querying directly
-      this.logger.log(`  Verifying items in database...`);
-      const itemsSnapshot = await templateRef
-        .collection('kitItems')
-        .orderBy('sortOrder')
-        .get();
-
-      this.logger.log(
-        `  Found ${itemsSnapshot.size} items in database (expected ${items.length})`,
-      );
-
-      if (itemsSnapshot.empty) {
-        this.logger.error(
-          `  ❌ ERROR: No items found in template ${publicTemplateId} after batch commit! Template path: publicKitTemplates/${publicTemplateId}/kitItems`,
-        );
-        throw new Error(
-          `Failed to save items to template ${publicTemplateId} - batch committed but no items found`,
-        );
-      } else if (itemsSnapshot.size !== items.length) {
-        this.logger.warn(
-          `  ⚠️  WARNING: Expected ${items.length} items but found ${itemsSnapshot.size} in template ${publicTemplateId}`,
-        );
-        // Log what we found
-        itemsSnapshot.docs.forEach((doc, idx) => {
-          const data = doc.data();
+        // If supply doesn't exist, create it
+        if (!supplyId) {
+          const category = this.findCategoryForSupply(item.supplyName, allCategories);
+          
           this.logger.log(
-            `    Item ${idx + 1}: ${data.supplyName} (qty: ${data.quantity}, supplyId: ${data.supplyId})`,
+            `    Creating supply "${item.supplyName}" in category "${category.name}"`,
           );
-        });
+
+          const { data: newSupply, error: createError } = await this.supabase
+            .from('supplies')
+            .insert({
+              name: item.supplyName,
+              category_id: category.id,
+              category_name: category.name,
+              scope: 'global',
+              tenant_id: null,
+              unit_type: 'piece',
+              base_unit: 'each',
+              expires: true,
+              osha_required: false,
+              is_active: true,
+              created_at: now.toISOString(),
+              updated_at: now.toISOString(),
+            })
+            .select()
+            .single();
+
+          if (createError || !newSupply || !newSupply.id) {
+            this.logger.error(
+              `    ❌ Failed to create supply "${item.supplyName}": ${createError?.message}`,
+            );
+            throw new Error(
+              `Failed to create supply "${item.supplyName}": ${createError?.message}`,
+            );
+          }
+
+          supplyId = newSupply.id;
+          this.logger.log(
+            `    ✅ Created supply "${item.supplyName}" (id: ${supplyId}) in category "${category.name}"`,
+          );
+
+          // Add to map for potential future use in this batch
+          // supplyId is guaranteed to be defined here (we checked newSupply.id above)
+          supplyMap.set(item.supplyName.toLowerCase(), supplyId as string);
+        }
+
+        // At this point, supplyId is guaranteed to be defined
+        if (!supplyId) {
+          throw new Error(`Supply ID is undefined for "${item.supplyName}"`);
+        }
+
+        const itemData: any = {
+          template_revision_id: revision.id,
+          supply_id: supplyId,
+          required_units: item.quantity,
+          sort_order: index,
+          scales_with_people: false,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+        };
+
+        // Only include notes if it's defined
+        if (item.notes) {
+          itemData.notes = item.notes;
+        }
+
+        this.logger.log(
+          `    Adding item ${index + 1}/${items.length}: ${item.supplyName} (qty: ${item.quantity}, supplyId: ${supplyId})`,
+        );
+
+        return itemData;
+      }),
+    );
+
+    this.logger.log(`  Inserting ${revisionItems.length} items into revision...`);
+    const { error } = await this.supabase
+      .from('kit_template_revision_items')
+      .insert(revisionItems);
+
+    if (error) {
+      this.logger.error(
+        `  ❌ Failed to insert items for template ${publicTemplateId}: ${error.message}`,
+      );
+      throw new Error(
+        `Failed to save items to template ${publicTemplateId}: ${error.message}`,
+      );
+    }
+
+    this.logger.log(`  ✅ Items inserted successfully`);
+
+    // Verify items were actually written
+    const { data: savedItems, error: verifyError } = await this.supabase
+      .from('kit_template_revision_items')
+      .select('*')
+      .eq('template_revision_id', revision.id)
+      .order('sort_order', { ascending: true });
+
+    if (verifyError) {
+      this.logger.warn(`  Could not verify items: ${verifyError.message}`);
+    } else {
+      this.logger.log(
+        `  Found ${savedItems?.length || 0} items in database (expected ${items.length})`,
+      );
+
+      if (!savedItems || savedItems.length === 0) {
+        throw new Error(
+          `Failed to save items to template ${publicTemplateId} - items inserted but none found`,
+        );
+      } else if (savedItems.length !== items.length) {
+        this.logger.warn(
+          `  ⚠️  WARNING: Expected ${items.length} items but found ${savedItems.length} in template ${publicTemplateId}`,
+        );
       } else {
         this.logger.log(
-          `  ✅ Verified ${itemsSnapshot.size} items exist in template ${publicTemplateId}`,
+          `  ✅ Verified ${savedItems.length} items exist in template ${publicTemplateId}`,
         );
-        // Log first few items as confirmation
-        itemsSnapshot.docs.slice(0, 3).forEach((doc, idx) => {
-          const data = doc.data();
-          this.logger.log(
-            `    Item ${idx + 1}: ${data.supplyName} (qty: ${data.quantity})`,
-          );
-        });
-        if (itemsSnapshot.size > 3) {
-          this.logger.log(`    ... and ${itemsSnapshot.size - 3} more items`);
-        }
       }
-    } catch (error: any) {
-      this.logger.error(
-        `  ❌ Failed to commit batch for template ${publicTemplateId}: ${error.message}`,
-        error.stack,
-      );
-      throw error;
     }
   }
 }

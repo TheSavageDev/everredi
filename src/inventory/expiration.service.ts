@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 
 @Injectable()
 export class ExpirationService {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   async getExpiringItemsByThreshold(
     userId: string,
@@ -13,26 +14,29 @@ export class ExpirationService {
     const results: any[] = [];
 
     for (const days of thresholdDays) {
-      const thresholdDate = Timestamp.fromDate(
-        new Date(Date.now() + days * 24 * 60 * 60 * 1000),
-      );
-      const now = Timestamp.now();
+      const thresholdDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const now = new Date();
 
-      const items = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'inventoryItems',
-        {
-          where: [
-            { field: 'status', operator: '==', value: 'active' },
-            { field: 'expirationDate', operator: '>=', value: now },
-            { field: 'expirationDate', operator: '<=', value: thresholdDate },
-          ],
-          orderBy: { field: 'expirationDate', direction: 'asc' },
-        },
-      );
+      const { data, error } = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .gte('expiration_date', now.toISOString())
+        .lte('expiration_date', thresholdDate.toISOString())
+        .order('expiration_date', { ascending: true });
 
-      results.push(...items.map((item) => ({ ...item, thresholdDays: days })));
+      if (error) {
+        // Log but continue with other thresholds
+        continue;
+      }
+
+      results.push(
+        ...(data || []).map((item) => ({
+          ...item,
+          thresholdDays: days,
+        })),
+      );
     }
 
     return results;
@@ -40,23 +44,25 @@ export class ExpirationService {
 
   async bulkUpdateExpirationDates(
     userId: string,
-    updates: Array<{ itemId: string; expirationDate: Timestamp }>,
+    updates: Array<{ itemId: string; expirationDate: Date }>,
   ): Promise<void> {
-    const batch = this.firebaseService.createBatch();
-
+    // Update each item individually (Supabase doesn't have true batch updates via JS client)
     for (const update of updates) {
-      const ref = this.firebaseService.getSubcollectionDocumentRef(
-        'users',
-        userId,
-        'inventoryItems',
-        update.itemId,
-      );
-      batch.update(ref, {
-        expirationDate: update.expirationDate,
-        updatedAt: Timestamp.now(),
-      });
-    }
+      const { error } = await this.supabase
+        .from('inventory_items')
+        .update({
+          expiration_date: update.expirationDate.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', update.itemId)
+        .eq('user_id', userId);
 
-    await batch.commit();
+      if (error) {
+        // Log error but continue with other updates
+        console.error(
+          `Failed to update expiration date for item ${update.itemId}: ${error.message}`,
+        );
+      }
+    }
   }
 }

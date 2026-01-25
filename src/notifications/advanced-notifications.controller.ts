@@ -8,7 +8,7 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
 import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -19,7 +19,7 @@ import {
 } from './advanced-notifications.service';
 
 @Controller('notifications')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard, PremiumGuard)
 export class AdvancedNotificationsController {
   constructor(
     private readonly advancedNotificationsService: AdvancedNotificationsService,

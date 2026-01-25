@@ -6,9 +6,8 @@ import {
   forwardRef,
   Logger,
 } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 import { UserKitsService } from '../kits/user-kits.service';
 import { UsersService } from '../users/users.service';
 
@@ -18,8 +17,8 @@ export interface SharedKit {
   ownerId: string;
   sharedWith: string; // userId
   permission: 'view' | 'edit';
-  sharedAt: Timestamp;
-  createdAt: Timestamp;
+  sharedAt: Date;
+  createdAt: Date;
 }
 
 export interface SharedKitLink {
@@ -28,8 +27,8 @@ export interface SharedKitLink {
   ownerId: string;
   linkToken: string;
   permission: 'view' | 'edit';
-  expiresAt?: Timestamp;
-  createdAt: Timestamp;
+  expiresAt?: Date;
+  createdAt: Date;
 }
 
 @Injectable()
@@ -37,7 +36,7 @@ export class SharingService {
   private readonly logger = new Logger(SharingService.name);
 
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly userKitsService: UserKitsService,
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
@@ -74,55 +73,51 @@ export class SharingService {
       throw new NotFoundException('Kit not found');
     }
 
-    // Check if already shared
-    const existingShare = await this.firestore
-      .collection('users')
-      .doc(ownerId)
-      .collection('userKits')
-      .doc(kitId)
-      .collection('sharedWith')
-      .where('sharedWith', '==', sharedWithUserId)
-      .limit(1)
-      .get();
+    // Ensure sharedWithUserId is trimmed for consistency
+    const trimmedSharedWithUserId = sharedWithUserId.trim();
 
-    if (!existingShare.empty) {
-      // Update existing share
-      const existingDoc = existingShare.docs[0];
-      await existingDoc.ref.update({
-        permission,
-        sharedAt: Timestamp.now(),
-      });
-      const updated = await existingDoc.ref.get();
-      return {
-        id: updated.id,
-        kitId: kitId.trim(),
-        ownerId: ownerIdStr.trim(),
-        ...updated.data(),
-      } as SharedKit;
+    // Use kit_acl instead of shared_kits
+    // kit_acl uses: kit_id, subject_type='user', subject_id=userId, permission
+    const now = new Date();
+    const { data: share, error } = await this.supabase
+      .from('kit_acl')
+      .upsert(
+        {
+          kit_id: kitId.trim(),
+          subject_type: 'user',
+          subject_id: trimmedSharedWithUserId,
+          permission: permission as 'view' | 'edit',
+          created_at: now.toISOString(),
+        },
+        {
+          onConflict: 'kit_id,subject_type,subject_id',
+        },
+      )
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to share kit: ${error.message}`);
     }
 
-    // Create new share
-    const now = Timestamp.now();
-    const shareRef = await this.firestore
-      .collection('users')
-      .doc(ownerIdStr.trim())
-      .collection('userKits')
-      .doc(kitId.trim())
-      .collection('sharedWith')
-      .add({
-        sharedWith: sharedWithUserId,
-        permission,
-        sharedAt: now,
-        createdAt: now,
-      });
+    // Get owner_id from kits.tenant_id → tenants.owner_user_id
+    const { data: kitData } = await this.supabase
+      .from('kits')
+      .select('tenant_id, tenants(owner_user_id)')
+      .eq('id', kitId.trim())
+      .single();
 
-    const shareDoc = await shareRef.get();
+    const ownerIdFromKit = (kitData?.tenants as any)?.owner_user_id || ownerIdStr.trim();
+
     return {
-      id: shareDoc.id,
-      kitId: kitId.trim(),
-      ownerId: ownerIdStr.trim(),
-      ...shareDoc.data(),
-    } as SharedKit;
+      id: share.id,
+      kitId: share.kit_id,
+      ownerId: ownerIdFromKit,
+      sharedWith: share.subject_id,
+      permission: share.permission as 'view' | 'edit',
+      sharedAt: new Date(share.created_at),
+      createdAt: new Date(share.created_at),
+    };
   }
 
   async createShareLink(
@@ -155,47 +150,53 @@ export class SharingService {
     // Generate unique token
     const linkToken = this.generateToken();
 
-    const now = Timestamp.now();
+    const now = new Date();
     const expiresAt = expiresInDays
-      ? Timestamp.fromMillis(
-          now.toMillis() + expiresInDays * 24 * 60 * 60 * 1000,
-        )
+      ? new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000)
       : undefined;
 
-    // Build the document data, only including expiresAt if it's defined
-    const linkData: {
-      linkToken: string;
-      permission: string;
-      createdAt: Timestamp;
-      expiresAt?: Timestamp;
-    } = {
-      linkToken,
+    const linkData: any = {
+      kit_id: kitId.trim(),
+      owner_id: ownerIdStr.trim(),
+      link_token: linkToken,
       permission,
-      createdAt: now,
+      created_at: now.toISOString(),
     };
 
-    // Only add expiresAt if it's defined (not undefined)
     if (expiresAt) {
-      linkData.expiresAt = expiresAt;
+      linkData.expires_at = expiresAt.toISOString();
     }
 
-    const linkRef = await this.firestore
-      .collection('users')
-      .doc(ownerIdStr.trim())
-      .collection('userKits')
-      .doc(kitId.trim())
-      .collection('shareLinks')
-      .add(linkData as firestore.DocumentData);
+    const { data: link, error } = await this.supabase
+      .from('share_links')
+      .insert(linkData)
+      .select()
+      .single();
 
-    const linkDoc = await linkRef.get();
+    if (error) {
+      throw new Error(`Failed to create share link: ${error.message}`);
+    }
+
     return {
-      id: linkDoc.id,
-      kitId: kitId.trim(),
-      ownerId: ownerIdStr.trim(),
-      ...linkDoc.data(),
-    } as SharedKitLink;
+      id: link.id,
+      kitId: link.kit_id,
+      ownerId: link.owner_id,
+      linkToken: link.link_token,
+      permission: link.permission,
+      expiresAt: link.expires_at
+        ? new Date(link.expires_at)
+        : undefined,
+      createdAt: new Date(link.created_at),
+    };
   }
 
+  /**
+   * CRITICAL PERFORMANCE FIX: This method replaces the O(n*m*k) nested loop query
+   * with a simple indexed SQL lookup - O(log n) performance!
+   *
+   * Old (Firestore): Scan all users → all kits → all shares = O(n*m*k)
+   * New (PostgreSQL): Indexed lookup on subject_id (where subject_type='user') = O(log n)
+   */
   async getSharedKits(userId: string): Promise<
     Array<
       Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
@@ -205,114 +206,96 @@ export class SharingService {
       }
     >
   > {
-    // Find all kits shared with this user
-    const allUsersSnapshot = await this.firestore.collection('users').get();
-    const sharedKits: Array<
-      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
-        sharedAt: string;
-        createdAt: string;
-        kitName: string;
-      }
-    > = [];
+    const trimmedUserId = userId.trim();
+    this.logger.log(
+      `[getSharedKits] Searching for kits shared with user: ${trimmedUserId}`,
+    );
 
-    for (const userDoc of allUsersSnapshot.docs) {
-      const ownerId = userDoc.id;
-      if (ownerId === userId) continue; // Skip own kits
+    // CRITICAL: This single query replaces the O(n*m*k) nested loops!
+    // Uses indexed lookup on subject_id (where subject_type='user') for O(log n) performance
+    const { data: sharedKits, error } = await this.supabase
+      .from('kit_acl')
+      .select(
+        `
+        id,
+        kit_id,
+        subject_id,
+        permission,
+        created_at,
+        kits!inner(
+          name,
+          tenant_id,
+          tenants(owner_user_id)
+        )
+      `,
+      )
+      .eq('subject_type', 'user')
+      .eq('subject_id', trimmedUserId);
 
-      const kitsSnapshot = await this.firestore
-        .collection('users')
-        .doc(ownerId)
-        .collection('userKits')
-        .get();
-
-      for (const kitDoc of kitsSnapshot.docs) {
-        const sharesSnapshot = await this.firestore
-          .collection('users')
-          .doc(ownerId)
-          .collection('userKits')
-          .doc(kitDoc.id)
-          .collection('sharedWith')
-          .where('sharedWith', '==', userId)
-          .get();
-
-        if (!sharesSnapshot.empty) {
-          const share = sharesSnapshot.docs[0].data() as any;
-          const kit = kitDoc.data();
-
-          // Convert Firestore Timestamps to ISO strings
-          const sharedAtTimestamp = share.sharedAt as Timestamp | undefined;
-          const createdAtTimestamp = share.createdAt as Timestamp | undefined;
-
-          const sharedAt = sharedAtTimestamp
-            ? sharedAtTimestamp.toDate
-              ? sharedAtTimestamp.toDate().toISOString()
-              : new Date(sharedAtTimestamp.toMillis()).toISOString()
-            : new Date().toISOString();
-          const createdAt = createdAtTimestamp
-            ? createdAtTimestamp.toDate
-              ? createdAtTimestamp.toDate().toISOString()
-              : new Date(createdAtTimestamp.toMillis()).toISOString()
-            : new Date().toISOString();
-
-          sharedKits.push({
-            id: sharesSnapshot.docs[0].id,
-            kitId: kitDoc.id,
-            ownerId,
-            sharedWith: userId,
-            permission: share.permission,
-            sharedAt,
-            createdAt,
-            kitName: kit.name || 'Unnamed Kit',
-          });
-        }
-      }
+    if (error) {
+      this.logger.error(
+        `Error fetching shared kits: ${error.message}`,
+        error.stack,
+      );
+      throw new Error(`Failed to get shared kits: ${error.message}`);
     }
 
-    return sharedKits;
+    if (!sharedKits || sharedKits.length === 0) {
+      this.logger.log(
+        `[getSharedKits] No shared kits found for user ${trimmedUserId}`,
+      );
+      return [];
+    }
+
+    this.logger.log(
+      `[getSharedKits] Found ${sharedKits.length} shared kits for user ${trimmedUserId}`,
+    );
+
+    // Transform the data to match the expected interface
+    return sharedKits.map((share: any) => ({
+      id: share.id,
+      kitId: share.kit_id,
+      ownerId: (share.kits?.tenants as any)?.owner_user_id || '',
+      sharedWith: share.subject_id,
+      permission: share.permission as 'view' | 'edit',
+      sharedAt: new Date(share.created_at).toISOString(),
+      createdAt: new Date(share.created_at).toISOString(),
+      kitName: share.kits?.name || 'Unnamed Kit',
+    }));
   }
 
   async getKitSharePermission(
     kitId: string,
     userId: string,
   ): Promise<{ isOwner: boolean; permission?: 'view' | 'edit' } | null> {
-    // First check if user owns the kit
-    const allUsersSnapshot = await this.firestore.collection('users').get();
+    const trimmedUserId = userId.trim();
+    const trimmedKitId = kitId.trim();
 
-    for (const userDoc of allUsersSnapshot.docs) {
-      const ownerId = userDoc.id;
+    // First check if user owns the kit (via tenant ownership)
+    const { data: kit, error: kitError } = await this.supabase
+      .from('kits')
+      .select('tenant_id, tenants(owner_user_id)')
+      .eq('id', trimmedKitId)
+      .single();
 
-      // Check if this is the user's own kit
-      if (ownerId === userId.trim()) {
-        const kitDoc = await this.firestore
-          .collection('users')
-          .doc(ownerId)
-          .collection('userKits')
-          .doc(kitId.trim())
-          .get();
+    if (!kitError && kit && (kit.tenants as any)?.owner_user_id === trimmedUserId) {
+      return { isOwner: true };
+    }
 
-        if (kitDoc.exists) {
-          return { isOwner: true };
-        }
-      }
+    // Check if kit is shared with this user via kit_acl
+    const { data: share, error: shareError } = await this.supabase
+      .from('kit_acl')
+      .select('permission')
+      .eq('kit_id', trimmedKitId)
+      .eq('subject_type', 'user')
+      .eq('subject_id', trimmedUserId)
+      .single();
 
-      // Check if kit is shared with this user
-      const shareSnapshot = await this.firestore
-        .collection('users')
-        .doc(ownerId)
-        .collection('userKits')
-        .doc(kitId.trim())
-        .collection('sharedWith')
-        .where('sharedWith', '==', userId.trim())
-        .limit(1)
-        .get();
-
-      if (!shareSnapshot.empty) {
-        const share = shareSnapshot.docs[0].data();
-        return {
-          isOwner: false,
-          permission: share.permission as 'view' | 'edit',
-        };
-      }
+    if (!shareError && share) {
+      return {
+        isOwner: false,
+        permission: share.permission as 'view' | 'edit',
+      };
     }
 
     return null; // Kit not found or not shared
@@ -331,73 +314,68 @@ export class SharingService {
       }
     >
   > {
-    const sharesSnapshot = await this.firestore
-      .collection('users')
-      .doc(ownerId.trim())
-      .collection('userKits')
-      .doc(kitId.trim())
-      .collection('sharedWith')
-      .get();
+    // Verify owner has access to this kit
+    const { data: kitData } = await this.supabase
+      .from('kits')
+      .select('tenant_id, tenants(owner_user_id)')
+      .eq('id', kitId.trim())
+      .single();
 
-    const shares: Array<
-      Omit<SharedKit, 'sharedAt' | 'createdAt'> & {
-        sharedAt: string;
-        createdAt: string;
-        sharedWithEmail?: string;
-        sharedWithDisplayName?: string;
-      }
-    > = [];
-
-    for (const shareDoc of sharesSnapshot.docs) {
-      const share = shareDoc.data() as any;
-
-      // Convert Firestore Timestamps to ISO strings
-      const sharedAtTimestamp = share.sharedAt as Timestamp | undefined;
-      const createdAtTimestamp = share.createdAt as Timestamp | undefined;
-
-      const sharedAt = sharedAtTimestamp
-        ? sharedAtTimestamp.toDate
-          ? sharedAtTimestamp.toDate().toISOString()
-          : new Date(sharedAtTimestamp.toMillis()).toISOString()
-        : new Date().toISOString();
-      const createdAt = createdAtTimestamp
-        ? createdAtTimestamp.toDate
-          ? createdAtTimestamp.toDate().toISOString()
-          : new Date(createdAtTimestamp.toMillis()).toISOString()
-        : new Date().toISOString();
-
-      // Get user info for the sharedWith user
-      let sharedWithEmail: string | undefined;
-      let sharedWithDisplayName: string | undefined;
-      try {
-        const sharedWithUser = await this.usersService.getUserById(
-          share.sharedWith,
-        );
-        if (sharedWithUser) {
-          sharedWithEmail = sharedWithUser.email;
-          sharedWithDisplayName = sharedWithUser.displayName;
-        }
-      } catch (error) {
-        // If we can't get user info, continue without it
-        this.logger.warn(
-          `Failed to get user info for ${share.sharedWith}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-
-      shares.push({
-        id: shareDoc.id,
-        kitId: kitId.trim(),
-        ownerId: ownerId.trim(),
-        sharedWith: share.sharedWith,
-        permission: share.permission,
-        sharedAt,
-        createdAt,
-        sharedWithEmail,
-        sharedWithDisplayName,
-      });
+    if (!kitData || (kitData.tenants as any)?.owner_user_id !== ownerId.trim()) {
+      throw new NotFoundException('Kit not found or access denied');
     }
 
-    return shares;
+    // Get all user shares for this kit (subject_type='user')
+    const { data: shares, error } = await this.supabase
+      .from('kit_acl')
+      .select('*')
+      .eq('kit_id', kitId.trim())
+      .eq('subject_type', 'user');
+
+    if (error) {
+      throw new Error(`Failed to get kit shares: ${error.message}`);
+    }
+
+    if (!shares || shares.length === 0) {
+      return [];
+    }
+
+    // Transform and enrich with user info
+    const enrichedShares = await Promise.all(
+      shares.map(async (share: any) => {
+        // Get user info for the sharedWith user (subject_id is the user ID)
+        let sharedWithEmail: string | undefined;
+        let sharedWithDisplayName: string | undefined;
+        try {
+          const sharedWithUser = await this.usersService.getUserById(
+            share.subject_id,
+          );
+          if (sharedWithUser) {
+            sharedWithEmail = sharedWithUser.email;
+            sharedWithDisplayName = sharedWithUser.displayName;
+          }
+        } catch (error) {
+          // If we can't get user info, continue without it
+          this.logger.warn(
+            `Failed to get user info for ${share.subject_id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
+        return {
+          id: share.id,
+          kitId: share.kit_id,
+          ownerId: ownerId.trim(),
+          sharedWith: share.subject_id,
+          permission: share.permission as 'view' | 'edit',
+          sharedAt: new Date(share.created_at).toISOString(),
+          createdAt: new Date(share.created_at).toISOString(),
+          sharedWithEmail,
+          sharedWithDisplayName,
+        };
+      }),
+    );
+
+    return enrichedShares;
   }
 
   async revokeShare(
@@ -405,43 +383,43 @@ export class SharingService {
     ownerId: string,
     shareId: string,
   ): Promise<void> {
-    await this.firestore
-      .collection('users')
-      .doc(ownerId)
-      .collection('userKits')
-      .doc(kitId)
-      .collection('sharedWith')
-      .doc(shareId)
-      .delete();
+    // Verify owner has access to this kit
+    const { data: kitData } = await this.supabase
+      .from('kits')
+      .select('tenant_id, tenants(owner_user_id)')
+      .eq('id', kitId.trim())
+      .single();
+
+    if (!kitData || (kitData.tenants as any)?.owner_user_id !== ownerId.trim()) {
+      throw new NotFoundException('Kit not found or access denied');
+    }
+
+    const { error } = await this.supabase
+      .from('kit_acl')
+      .delete()
+      .eq('id', shareId)
+      .eq('kit_id', kitId.trim())
+      .eq('subject_type', 'user');
+
+    if (error) {
+      throw new Error(`Failed to revoke share: ${error.message}`);
+    }
   }
 
   async removeSharedKit(kitId: string, userId: string): Promise<void> {
-    // Find the share document where this user is the recipient
-    // We need to search across all users to find the owner
-    const allUsersSnapshot = await this.firestore.collection('users').get();
+    // Simple indexed lookup - no need to scan all users!
+    const { data, error } = await this.supabase
+      .from('kit_acl')
+      .delete()
+      .eq('kit_id', kitId.trim())
+      .eq('subject_type', 'user')
+      .eq('subject_id', userId.trim())
+      .select()
+      .single();
 
-    for (const userDoc of allUsersSnapshot.docs) {
-      const ownerId = userDoc.id;
-      if (ownerId === userId.trim()) continue; // Skip own kits
-
-      const shareSnapshot = await this.firestore
-        .collection('users')
-        .doc(ownerId)
-        .collection('userKits')
-        .doc(kitId.trim())
-        .collection('sharedWith')
-        .where('sharedWith', '==', userId.trim())
-        .limit(1)
-        .get();
-
-      if (!shareSnapshot.empty) {
-        // Found the share, delete it
-        await shareSnapshot.docs[0].ref.delete();
-        return;
-      }
+    if (error || !data) {
+      throw new NotFoundException('Shared kit not found');
     }
-
-    throw new NotFoundException('Shared kit not found');
   }
 
   async revokeShareLink(
@@ -449,14 +427,16 @@ export class SharingService {
     ownerId: string,
     linkId: string,
   ): Promise<void> {
-    await this.firestore
-      .collection('users')
-      .doc(ownerId)
-      .collection('userKits')
-      .doc(kitId)
-      .collection('shareLinks')
-      .doc(linkId)
-      .delete();
+    const { error } = await this.supabase
+      .from('share_links')
+      .delete()
+      .eq('id', linkId)
+      .eq('kit_id', kitId.trim())
+      .eq('owner_id', ownerId.trim());
+
+    if (error) {
+      throw new Error(`Failed to revoke share link: ${error.message}`);
+    }
   }
 
   private generateToken(): string {

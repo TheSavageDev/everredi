@@ -8,14 +8,14 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
 import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SharingService } from './sharing.service';
 
 @Controller('sharing')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard, PremiumGuard)
 export class SharingController {
   constructor(private readonly sharingService: SharingService) {}
 

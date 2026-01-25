@@ -11,7 +11,7 @@ import {
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { SkipThrottle } from '@nestjs/throttler';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SubscriptionsService } from './subscriptions.service';
 import { StripeService } from './stripe.service';
@@ -28,7 +28,7 @@ export class SubscriptionsController {
   ) {}
 
   @Post('create-checkout')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async createCheckoutSession(
     @CurrentUser() user: { uid: string },
     @Body() body: { priceId: string; mode?: 'subscription' | 'payment' },
@@ -47,7 +47,7 @@ export class SubscriptionsController {
   }
 
   @Post('portal')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async createCustomerPortal(@CurrentUser() user: { uid: string }) {
     const session = await this.subscriptionsService.createCustomerPortalSession(
       user.uid,
@@ -85,7 +85,7 @@ export class SubscriptionsController {
   }
 
   @Get('revenuecat/info')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async getRevenueCatInfo(@CurrentUser() user: { uid: string }): Promise<{
     success: boolean;
     data?: unknown;
@@ -119,7 +119,7 @@ export class SubscriptionsController {
   }
 
   @Post('revenuecat/cancel')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async cancelRevenueCatSubscription(
     @CurrentUser() user: { uid: string },
     @Body() body: { productId: string },
@@ -151,6 +151,70 @@ export class SubscriptionsController {
         error: {
           message: errorMessage,
         },
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  @Post('revenuecat/webhook')
+  @SkipThrottle()
+  async handleRevenueCatWebhook(
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    try {
+      // Verify webhook authorization (RevenueCat sends Authorization header with shared secret)
+      const webhookSecret = process.env.REVENUECAT_WEBHOOK_SECRET;
+      if (webhookSecret) {
+        const providedSecret = authHeader?.replace('Bearer ', '');
+        if (providedSecret !== webhookSecret) {
+          this.logger.warn(
+            '[RevenueCat Webhook] Invalid authorization secret',
+          );
+          return { received: false, error: 'Unauthorized' };
+        }
+      }
+
+      this.logger.log(
+        `[RevenueCat Webhook] Received event: ${JSON.stringify(body).substring(0, 200)}`,
+      );
+
+      await this.subscriptionsService.handleRevenueCatWebhook(body);
+      return { received: true };
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        '[RevenueCat Webhook] Error:',
+        error instanceof Error ? error.stack : String(error),
+      );
+      return { received: false, error: errorMessage };
+    }
+  }
+
+  @Post('revenuecat/sync')
+  @UseGuards(SupabaseAuthGuard)
+  async syncRevenueCatData(@CurrentUser() user: { uid: string }) {
+    try {
+      // Manually sync RevenueCat data for the current user
+      const customerInfo = await this.revenueCatService.getCustomerInfo(
+        user.uid,
+      );
+      await this.subscriptionsService.syncRevenueCatCustomerToDatabase(
+        user.uid,
+        customerInfo,
+      );
+      return {
+        success: true,
+        message: 'RevenueCat data synced successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: { message: errorMessage },
         timestamp: new Date().toISOString(),
       };
     }

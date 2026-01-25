@@ -1,7 +1,7 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 
 export interface PublicKitTemplate {
   id: string;
@@ -16,53 +16,79 @@ export interface PublicKitTemplate {
   publicTemplateId?: string; // Reference to user template if synced from user
   defaultPeopleCount?: number; // Default: 1
   peopleCountOptions?: number[]; // e.g., [2, 4, 8] - additional options beyond default
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Helper function to convert PostgreSQL row to PublicKitTemplate
+function rowToPublicTemplate(row: any): PublicKitTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    purpose: row.purpose,
+    groupSize: row.group_size,
+    environment: row.environment,
+    skillLevel: row.skill_level,
+    isActive: row.is_active,
+    createdBy: row.created_by,
+    publicTemplateId: row.public_template_id,
+    defaultPeopleCount: row.default_people_count,
+    peopleCountOptions: row.people_count_options,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 @Injectable()
 export class PublicTemplatesService {
-  constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-  ) {}
+  private readonly logger = new Logger(PublicTemplatesService.name);
+
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   async getPublicTemplates(
     purpose?: string,
     skillLevel?: string,
   ): Promise<PublicKitTemplate[]> {
-    let query = this.firestore
-      .collection('publicKitTemplates')
-      .where('isActive', '==', true);
+    let query = this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('is_public', true)
+      .eq('is_active', true);
 
     if (purpose) {
-      query = query.where('purpose', '==', purpose);
+      query = query.eq('purpose', purpose);
     }
 
     if (skillLevel) {
-      query = query.where('skillLevel', '==', skillLevel);
+      query = query.eq('skill_level', skillLevel);
     }
 
-    const snapshot = await query.orderBy('createdAt', 'desc').limit(50).get();
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
-    })) as PublicKitTemplate[];
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      throw new Error(`Failed to get public templates: ${error.message}`);
+    }
+
+    return (data || []).map(rowToPublicTemplate);
   }
 
   async getPublicTemplate(templateId: string): Promise<PublicKitTemplate> {
-    const doc = await this.firestore
-      .collection('publicKitTemplates')
-      .doc(templateId)
-      .get();
+    const { data, error } = await this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('id', templateId)
+      .eq('is_public', true)
+      .eq('is_active', true)
+      .single();
 
-    if (!doc.exists) {
+    if (error || !data) {
       throw new NotFoundException('Public kit template not found');
     }
 
-    return {
-      id: doc.id,
-      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
-    } as PublicKitTemplate;
+    return rowToPublicTemplate(data);
   }
 
   async createPublicTemplate(
@@ -71,80 +97,108 @@ export class PublicTemplatesService {
       'id' | 'isActive' | 'createdAt' | 'updatedAt'
     > & { isActive?: boolean },
   ): Promise<PublicKitTemplate> {
-    const now = Timestamp.now();
-    const docRef = await this.firestore.collection('publicKitTemplates').add({
-      ...templateData,
-      isActive: templateData.isActive ?? true,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('kit_templates')
+      .insert({
+        user_id: null, // Public templates don't have a user_id
+        name: templateData.name,
+        description: templateData.description,
+        purpose: templateData.purpose,
+        group_size: templateData.groupSize,
+        environment: templateData.environment,
+        skill_level: templateData.skillLevel,
+        is_public: true,
+        is_active: templateData.isActive ?? true,
+        created_by: templateData.createdBy,
+        public_template_id: templateData.publicTemplateId,
+        default_people_count: templateData.defaultPeopleCount ?? 1,
+        people_count_options: templateData.peopleCountOptions,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
 
-    const doc = await docRef.get();
-    return {
-      id: doc.id,
-      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
-    } as PublicKitTemplate;
+    if (error) {
+      throw new Error(`Failed to create public template: ${error.message}`);
+    }
+
+    return rowToPublicTemplate(data);
   }
 
   async updatePublicTemplate(
     templateId: string,
     updates: Partial<PublicKitTemplate>,
   ): Promise<PublicKitTemplate> {
-    const templateRef = this.firestore
-      .collection('publicKitTemplates')
-      .doc(templateId);
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
 
-    const doc = await templateRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Public template not found');
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.description !== undefined)
+      updateData.description = updates.description;
+    if (updates.purpose !== undefined) updateData.purpose = updates.purpose;
+    if (updates.groupSize !== undefined)
+      updateData.group_size = updates.groupSize;
+    if (updates.environment !== undefined)
+      updateData.environment = updates.environment;
+    if (updates.skillLevel !== undefined)
+      updateData.skill_level = updates.skillLevel;
+    if (updates.defaultPeopleCount !== undefined)
+      updateData.default_people_count = updates.defaultPeopleCount;
+    if (updates.peopleCountOptions !== undefined)
+      updateData.people_count_options = updates.peopleCountOptions;
+
+    const { data, error } = await this.supabase
+      .from('kit_templates')
+      .update(updateData)
+      .eq('id', templateId)
+      .eq('is_public', true)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update public template: ${error.message}`);
     }
 
-    await templateRef.update({
-      ...updates,
-      updatedAt: Timestamp.now(),
-    });
-
-    const updatedDoc = await templateRef.get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as PublicKitTemplate;
+    return rowToPublicTemplate(data);
   }
 
   async deletePublicTemplate(templateId: string): Promise<void> {
-    const templateRef = this.firestore
-      .collection('publicKitTemplates')
-      .doc(templateId);
-
-    const doc = await templateRef.get();
-    if (!doc.exists) {
-      throw new NotFoundException('Public template not found');
-    }
-
     // Soft delete by setting isActive to false
-    await templateRef.update({
-      isActive: false,
-      updatedAt: Timestamp.now(),
-    });
+    const { error } = await this.supabase
+      .from('kit_templates')
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', templateId)
+      .eq('is_public', true);
+
+    if (error) {
+      throw new Error(`Failed to delete public template: ${error.message}`);
+    }
   }
 
   async findPublicTemplateByUserTemplateId(
     userId: string,
     userTemplateId: string,
   ): Promise<PublicKitTemplate | null> {
-    const snapshot = await this.firestore
-      .collection('publicKitTemplates')
-      .where('publicTemplateId', '==', `${userId}/${userTemplateId}`)
-      .where('isActive', '==', true)
+    const { data, error } = await this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('public_template_id', `${userId}/${userTemplateId}`)
+      .eq('is_active', true)
+      .eq('is_public', true)
       .limit(1)
-      .get();
+      .single();
 
-    if (snapshot.empty) {
+    if (error || !data) {
       return null;
     }
 
-    const doc = snapshot.docs[0];
-    return {
-      id: doc.id,
-      ...(doc.data() as unknown as Omit<PublicKitTemplate, 'id'>),
-    } as PublicKitTemplate;
+    return rowToPublicTemplate(data);
   }
 
   /**
@@ -188,43 +242,93 @@ export class PublicTemplatesService {
       notes?: string;
     }>
   > {
-    const templateRef = this.firestore
-      .collection('publicKitTemplates')
-      .doc(templateId);
+    // Get template
+    const { data: template, error: templateError } = await this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('id', templateId)
+      .eq('is_public', true)
+      .eq('is_active', true)
+      .single();
 
-    const templateDoc = await templateRef.get();
-    if (!templateDoc.exists) {
+    if (templateError || !template) {
       throw new NotFoundException('Public kit template not found');
     }
 
-    const template = templateDoc.data() as PublicKitTemplate;
-    const defaultPeopleCount = template.defaultPeopleCount ?? 1;
+    const templateData = rowToPublicTemplate(template);
+    const defaultPeopleCount = templateData.defaultPeopleCount ?? 1;
     const peopleCount = selectedPeopleCount ?? defaultPeopleCount;
 
-    const itemsSnapshot = await templateRef
-      .collection('kitItems')
-      .orderBy('sortOrder')
-      .get();
+    // Get the latest revision for this template
+    const { data: revision, error: revisionError } = await this.supabase
+      .from('kit_template_revisions')
+      .select('id')
+      .eq('kit_template_id', templateId)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single();
 
-    return itemsSnapshot.docs.map((doc) => {
-      const data = doc.data() as {
-        supplyId: string;
-        supplyName?: string;
-        quantity: number;
-        scalesWithPeople?: boolean;
-        peopleCountQuantities?: Record<number, number>;
-        notes?: string;
-      };
+    if (revisionError || !revision) {
+      // No revision found, return empty array
+      return [];
+    }
+
+    // Get template items from the revision
+    const { data: items, error: itemsError } = await this.supabase
+      .from('kit_template_revision_items')
+      .select('*')
+      .eq('template_revision_id', revision.id)
+      .order('sort_order', { ascending: true });
+
+    if (itemsError) {
+      throw new Error(`Failed to get template items: ${itemsError.message}`);
+    }
+
+    // Get all supply IDs to fetch supply names
+    const supplyIds = (items || [])
+      .map((item: any) => item.supply_id)
+      .filter((id: string | null) => id !== null) as string[];
+
+    // Fetch supply names in batch
+    const supplyNamesMap = new Map<string, string>();
+    if (supplyIds.length > 0) {
+      const { data: supplies, error: suppliesError } = await this.supabase
+        .from('supplies')
+        .select('id, name')
+        .in('id', supplyIds);
+
+      if (!suppliesError && supplies) {
+        supplies.forEach((supply: any) => {
+          supplyNamesMap.set(supply.id, supply.name);
+        });
+      }
+    }
+
+    return (items || []).map((item: any, index: number) => {
+      // Calculate quantity from required_units (template requirement)
+      // required_units is the base quantity from the template
+      const baseQuantity = item.required_units ?? 0;
+
       const quantity = this.calculateItemQuantity(
-        data,
+        {
+          quantity: baseQuantity,
+          scalesWithPeople: item.scales_with_people,
+          peopleCountQuantities: item.people_count_units,
+        },
         peopleCount,
         defaultPeopleCount,
       );
+
+      // Get supply name from the map
+      const supplyName = item.supply_id
+        ? supplyNamesMap.get(item.supply_id)
+        : undefined;
+
       return {
-        supplyId: data.supplyId,
-        supplyName: data.supplyName,
-        quantity,
-        notes: data.notes,
+        supplyId: item.supply_id,
+        supplyName,
+        quantity, // This is the required quantity (may be 0 if template has 0, but usually should be > 0)
+        notes: item.notes,
       };
     });
   }

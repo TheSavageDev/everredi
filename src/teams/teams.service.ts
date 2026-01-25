@@ -4,9 +4,9 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 
 export interface Team {
@@ -14,8 +14,8 @@ export interface Team {
   name: string;
   description?: string;
   ownerId: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface TeamMember {
@@ -24,14 +24,38 @@ export interface TeamMember {
   userId: string;
   role: 'admin' | 'member' | 'viewer';
   invitedBy: string;
-  joinedAt: Timestamp;
-  createdAt: Timestamp;
+  joinedAt: Date;
+  createdAt: Date;
+}
+
+// Helper functions to convert PostgreSQL rows
+function rowToTeam(row: any): Team {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    ownerId: row.owner_id,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToTeamMember(row: any): TeamMember {
+  return {
+    id: row.id,
+    teamId: row.team_id,
+    userId: row.user_id,
+    role: row.role,
+    invitedBy: row.invited_by || row.user_id, // Default to user_id if not set
+    joinedAt: new Date(row.joined_at),
+    createdAt: new Date(row.joined_at), // Use joined_at as created_at
+  };
 }
 
 @Injectable()
 export class TeamsService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
   ) {}
 
@@ -39,88 +63,111 @@ export class TeamsService {
     userId: string,
     teamData: Omit<Team, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
   ): Promise<Team> {
-    const now = Timestamp.now();
-    const teamRef = this.firestore.collection('teams').doc();
+    const now = new Date();
 
-    const team: Omit<Team, 'id'> = {
-      ...teamData,
-      ownerId: userId,
-      createdAt: now,
-      updatedAt: now,
-    };
+    // Create team
+    const { data: team, error: teamError } = await this.supabase
+      .from('teams')
+      .insert({
+        name: teamData.name,
+        description: teamData.description,
+        owner_id: userId,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
 
-    await teamRef.set(team);
+    if (teamError || !team) {
+      throw new Error(`Failed to create team: ${teamError?.message}`);
+    }
 
     // Add owner as admin member
-    await this.firestore
-      .collection('teams')
-      .doc(teamRef.id)
-      .collection('members')
-      .add({
-        userId,
+    const { error: memberError } = await this.supabase
+      .from('team_members')
+      .insert({
+        team_id: team.id,
+        user_id: userId,
         role: 'admin',
-        invitedBy: userId,
-        joinedAt: now,
-        createdAt: now,
+        joined_at: now.toISOString(),
       });
 
-    return { id: teamRef.id, ...team };
+    if (memberError) {
+      // Rollback team creation
+      await this.supabase.from('teams').delete().eq('id', team.id);
+      throw new Error(`Failed to add owner as member: ${memberError.message}`);
+    }
+
+    return rowToTeam(team);
   }
 
   async getTeamsByUser(userId: string): Promise<Team[]> {
     // Get teams where user is owner
-    const ownedTeamsSnapshot = await this.firestore
-      .collection('teams')
-      .where('ownerId', '==', userId)
-      .get();
+    const { data: ownedTeams, error: ownedError } = await this.supabase
+      .from('teams')
+      .select('*')
+      .eq('owner_id', userId);
 
-    // Get teams where user is a member
-    const memberTeamsSnapshot = await this.firestore
-      .collectionGroup('members')
-      .where('userId', '==', userId)
-      .get();
-
-    const teamIds = new Set<string>();
-    ownedTeamsSnapshot.docs.forEach((doc) => teamIds.add(doc.id));
-    memberTeamsSnapshot.docs.forEach((doc) => {
-      const teamId = doc.ref.parent.parent?.id;
-      if (teamId) teamIds.add(teamId);
-    });
-
-    const teams: Team[] = [];
-    for (const teamId of teamIds) {
-      const teamDoc = await this.firestore
-        .collection('teams')
-        .doc(teamId)
-        .get();
-      if (teamDoc.exists) {
-        teams.push({ id: teamDoc.id, ...teamDoc.data() } as Team);
-      }
+    if (ownedError) {
+      throw new Error(`Failed to get owned teams: ${ownedError.message}`);
     }
 
-    return teams;
+    // Get teams where user is a member
+    const { data: memberships, error: memberError } = await this.supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('user_id', userId);
+
+    if (memberError) {
+      throw new Error(`Failed to get team memberships: ${memberError.message}`);
+    }
+
+    const teamIds = new Set<string>();
+    (ownedTeams || []).forEach((team) => teamIds.add(team.id));
+    (memberships || []).forEach((m) => teamIds.add(m.team_id));
+
+    if (teamIds.size === 0) {
+      return [];
+    }
+
+    // Fetch all teams
+    const { data: teams, error: teamsError } = await this.supabase
+      .from('teams')
+      .select('*')
+      .in('id', Array.from(teamIds));
+
+    if (teamsError) {
+      throw new Error(`Failed to get teams: ${teamsError.message}`);
+    }
+
+    return (teams || []).map(rowToTeam);
   }
 
   async getTeam(teamId: string): Promise<Team | null> {
-    const doc = await this.firestore.collection('teams').doc(teamId).get();
-    if (!doc.exists) {
+    const { data, error } = await this.supabase
+      .from('teams')
+      .select('*')
+      .eq('id', teamId)
+      .single();
+
+    if (error || !data) {
       return null;
     }
-    return { id: doc.id, ...doc.data() } as Team;
+
+    return rowToTeam(data);
   }
 
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
-    const snapshot = await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .collection('members')
-      .get();
+    const { data, error } = await this.supabase
+      .from('team_members')
+      .select('*')
+      .eq('team_id', teamId);
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      teamId,
-      ...doc.data(),
-    })) as TeamMember[];
+    if (error) {
+      throw new Error(`Failed to get team members: ${error.message}`);
+    }
+
+    return (data || []).map(rowToTeamMember);
   }
 
   async inviteMember(
@@ -140,21 +187,23 @@ export class TeamsService {
       throw new BadRequestException('User is already a member of this team');
     }
 
-    const now = Timestamp.now();
-    const memberRef = await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .collection('members')
-      .add({
-        userId,
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('team_members')
+      .insert({
+        team_id: teamId,
+        user_id: userId,
         role,
-        invitedBy: inviterId,
-        joinedAt: now,
-        createdAt: now,
-      });
+        joined_at: now.toISOString(),
+      })
+      .select()
+      .single();
 
-    const memberDoc = await memberRef.get();
-    return { id: memberDoc.id, teamId, ...memberDoc.data() } as TeamMember;
+    if (error) {
+      throw new Error(`Failed to invite member: ${error.message}`);
+    }
+
+    return rowToTeamMember(data);
   }
 
   async updateMemberRole(
@@ -175,16 +224,19 @@ export class TeamsService {
       throw new BadRequestException('Only admins can update member roles');
     }
 
-    const memberRef = this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .collection('members')
-      .doc(memberId);
+    const { data, error } = await this.supabase
+      .from('team_members')
+      .update({ role: newRole })
+      .eq('id', memberId)
+      .eq('team_id', teamId)
+      .select()
+      .single();
 
-    await memberRef.update({ role: newRole });
+    if (error) {
+      throw new Error(`Failed to update member role: ${error.message}`);
+    }
 
-    const memberDoc = await memberRef.get();
-    return { id: memberDoc.id, teamId, ...memberDoc.data() } as TeamMember;
+    return rowToTeamMember(data);
   }
 
   async removeMember(
@@ -204,12 +256,15 @@ export class TeamsService {
       throw new BadRequestException('Only admins can remove members');
     }
 
-    await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .collection('members')
-      .doc(memberId)
-      .delete();
+    const { error } = await this.supabase
+      .from('team_members')
+      .delete()
+      .eq('id', memberId)
+      .eq('team_id', teamId);
+
+    if (error) {
+      throw new Error(`Failed to remove member: ${error.message}`);
+    }
   }
 
   async updateTeam(
@@ -226,19 +281,26 @@ export class TeamsService {
       throw new BadRequestException('Only the owner can update the team');
     }
 
-    await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .update({
-        ...updates,
-        updatedAt: Timestamp.now(),
-      });
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
 
-    const updatedDoc = await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as Team;
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.description !== undefined)
+      updateData.description = updates.description;
+
+    const { data, error } = await this.supabase
+      .from('teams')
+      .update(updateData)
+      .eq('id', teamId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update team: ${error.message}`);
+    }
+
+    return rowToTeam(data);
   }
 
   async deleteTeam(teamId: string, userId: string): Promise<void> {
@@ -251,20 +313,24 @@ export class TeamsService {
       throw new BadRequestException('Only the owner can delete the team');
     }
 
-    // Delete all members first
-    const membersSnapshot = await this.firestore
-      .collection('teams')
-      .doc(teamId)
-      .collection('members')
-      .get();
+    // Delete all members (cascade should handle this, but explicit for clarity)
+    const { error: membersError } = await this.supabase
+      .from('team_members')
+      .delete()
+      .eq('team_id', teamId);
 
-    const batch = this.firestore.batch();
-    membersSnapshot.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    await batch.commit();
+    if (membersError) {
+      throw new Error(`Failed to delete team members: ${membersError.message}`);
+    }
 
     // Delete team
-    await this.firestore.collection('teams').doc(teamId).delete();
+    const { error: teamError } = await this.supabase
+      .from('teams')
+      .delete()
+      .eq('id', teamId);
+
+    if (teamError) {
+      throw new Error(`Failed to delete team: ${teamError.message}`);
+    }
   }
 }

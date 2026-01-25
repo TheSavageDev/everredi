@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import * as crypto from 'crypto';
 
 export interface ApiKey {
@@ -8,15 +9,29 @@ export interface ApiKey {
   userId: string;
   name: string;
   keyHash: string; // Hashed version of the key
-  lastUsed?: Timestamp;
-  createdAt: Timestamp;
-  expiresAt?: Timestamp;
+  lastUsed?: Date;
+  createdAt: Date;
+  expiresAt?: Date;
   isActive: boolean;
+}
+
+// Helper function to convert PostgreSQL row to ApiKey
+function rowToApiKey(row: any): ApiKey {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    keyHash: row.key_hash,
+    lastUsed: row.last_used_at ? new Date(row.last_used_at) : undefined,
+    createdAt: new Date(row.created_at),
+    expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
+    isActive: row.is_active,
+  };
 }
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   async generateApiKey(
     userId: string,
@@ -27,81 +42,84 @@ export class ApiKeysService {
     const key = `ek_${crypto.randomBytes(32).toString('hex')}`;
     const keyHash = this.hashKey(key);
 
-    const now = Timestamp.now();
+    const now = new Date();
     const expiresAt = expiresInDays
-      ? Timestamp.fromMillis(
-          now.toMillis() + expiresInDays * 24 * 60 * 60 * 1000,
-        )
-      : undefined;
+      ? new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000)
+      : null;
 
-    const apiKey = await this.firebaseService.addSubcollectionDocument<ApiKey>(
-      'users',
-      userId,
-      'apiKeys',
-      {
+    const { data, error } = await this.supabase
+      .from('api_keys')
+      .insert({
+        user_id: userId,
         name,
-        keyHash,
-        createdAt: now,
-        expiresAt,
-        isActive: true,
-      },
-    );
+        key_hash: keyHash,
+        created_at: now.toISOString(),
+        expires_at: expiresAt?.toISOString() || null,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to generate API key: ${error.message}`);
+    }
 
     // Return the plain key only once (for display to user)
-    return { key, apiKey };
+    return { key, apiKey: rowToApiKey(data) };
   }
 
   async getApiKeys(userId: string): Promise<Omit<ApiKey, 'keyHash'>[]> {
-    const apiKeys = await this.firebaseService.getSubcollection<ApiKey>(
-      'users',
-      userId,
-      'apiKeys',
-      {
-        orderBy: { field: 'createdAt', direction: 'desc' },
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('api_keys')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-    return apiKeys.map((apiKey) => {
+    if (error) {
+      throw new Error(`Failed to get API keys: ${error.message}`);
+    }
+
+    return (data || []).map((row) => {
+      const apiKey = rowToApiKey(row);
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { keyHash, ...rest } = apiKey;
-      return {
-        ...rest,
-        userId,
-      } as Omit<ApiKey, 'keyHash'>;
+      return rest;
     });
   }
 
   async revokeApiKey(userId: string, keyId: string): Promise<void> {
-    await this.firebaseService.updateSubcollectionDocument(
-      'users',
-      userId,
-      'apiKeys',
-      keyId,
-      { isActive: false },
-    );
+    const { error } = await this.supabase
+      .from('api_keys')
+      .update({ is_active: false })
+      .eq('id', keyId)
+      .eq('user_id', userId);
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        throw new NotFoundException('API key not found');
+      }
+      throw new Error(`Failed to revoke API key: ${error.message}`);
+    }
   }
 
   async getApiKeyUsage(
     userId: string,
     keyId: string,
-  ): Promise<{ usageCount: number; lastUsed?: Timestamp }> {
-    // This would typically query a usage tracking collection
-    // For now, return basic info from the key itself
-    const key = await this.firebaseService.getSubcollectionDocument<ApiKey>(
-      'users',
-      userId,
-      'apiKeys',
-      keyId,
-      { throwIfNotFound: true },
-    );
+  ): Promise<{ usageCount: number; lastUsed?: Date }> {
+    const { data, error } = await this.supabase
+      .from('api_keys')
+      .select('*')
+      .eq('id', keyId)
+      .eq('user_id', userId)
+      .single();
 
-    if (!key) {
+    if (error || !data) {
       throw new NotFoundException('API key not found');
     }
 
     return {
       usageCount: 0, // TODO: Implement usage tracking
-      lastUsed: key.lastUsed,
+      lastUsed: data.last_used_at ? new Date(data.last_used_at) : undefined,
     };
   }
 
@@ -110,50 +128,35 @@ export class ApiKeysService {
   ): Promise<{ userId: string; keyId: string } | null> {
     const keyHash = this.hashKey(key);
 
-    // Search all users' API keys for matching hash
-    const allUsers = await this.firebaseService.getCollection<{ id: string }>(
-      'users',
-    );
+    // Search for matching hash in api_keys table
+    const { data, error } = await this.supabase
+      .from('api_keys')
+      .select('id, user_id, expires_at, is_active')
+      .eq('key_hash', keyHash)
+      .eq('is_active', true)
+      .single();
 
-    for (const user of allUsers) {
-      const keys = await this.firebaseService.getSubcollection<ApiKey>(
-        'users',
-        user.id,
-        'apiKeys',
-        {
-          where: [
-            { field: 'keyHash', operator: '==', value: keyHash },
-            { field: 'isActive', operator: '==', value: true },
-          ],
-          limit: 1,
-        },
-      );
-
-      if (keys.length > 0) {
-        const keyData = keys[0];
-
-        // Check expiration
-        if (keyData.expiresAt && keyData.expiresAt.toMillis() < Date.now()) {
-          return null;
-        }
-
-        // Update last used
-        await this.firebaseService.updateSubcollectionDocument(
-          'users',
-          user.id,
-          'apiKeys',
-          keyData.id,
-          { lastUsed: Timestamp.now() },
-        );
-
-        return {
-          userId: user.id,
-          keyId: keyData.id,
-        };
-      }
+    if (error || !data) {
+      return null;
     }
 
-    return null;
+    // Check expiration
+    if (data.expires_at && new Date(data.expires_at) < new Date()) {
+      return null;
+    }
+
+    // Update last used
+    await this.supabase
+      .from('api_keys')
+      .update({
+        last_used_at: new Date().toISOString(),
+      })
+      .eq('id', data.id);
+
+    return {
+      userId: data.user_id,
+      keyId: data.id,
+    };
   }
 
   private hashKey(key: string): string {

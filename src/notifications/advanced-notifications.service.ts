@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 
 export interface AlertThreshold {
@@ -10,8 +11,8 @@ export interface AlertThreshold {
   daysBeforeExpiration: number;
   alertLevel: 'warning' | 'critical';
   isActive: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface LowStockAlert {
@@ -21,8 +22,8 @@ export interface LowStockAlert {
   supplyName: string;
   minimumQuantity: number;
   isActive: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface NotificationPreferences {
@@ -33,25 +34,68 @@ export interface NotificationPreferences {
   expirationAlertsEnabled: boolean;
   lowStockAlertsEnabled: boolean;
   usageRemindersEnabled: boolean;
-  updatedAt: Timestamp;
+  updatedAt: Date;
+}
+
+// Helper functions to convert PostgreSQL rows
+function rowToAlertThreshold(row: any): AlertThreshold {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    categoryId: row.category_id,
+    daysBeforeExpiration: row.days_before_expiration,
+    alertLevel: row.alert_level,
+    isActive: row.is_active,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToLowStockAlert(row: any): LowStockAlert {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    supplyId: row.supply_id,
+    supplyName: row.supply_name,
+    minimumQuantity: row.minimum_quantity,
+    isActive: row.is_active,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToNotificationPreferences(row: any): NotificationPreferences {
+  return {
+    userId: row.user_id,
+    emailEnabled: row.email_enabled,
+    pushEnabled: row.push_enabled,
+    emailFrequency: row.email_frequency,
+    expirationAlertsEnabled: row.expiration_alerts_enabled,
+    lowStockAlertsEnabled: row.low_stock_alerts_enabled,
+    usageRemindersEnabled: row.usage_reminders_enabled,
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 @Injectable()
 export class AdvancedNotificationsService {
   constructor(
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
   ) {}
 
   async getAlertThresholds(userId: string): Promise<AlertThreshold[]> {
-    return this.firebaseService.getSubcollection<AlertThreshold>(
-      'users',
-      userId,
-      'alertThresholds',
-      {
-        where: [{ field: 'isActive', operator: '==', value: true }],
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('alert_thresholds')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (error) {
+      throw new Error(`Failed to get alert thresholds: ${error.message}`);
+    }
+
+    return (data || []).map(rowToAlertThreshold);
   }
 
   async createAlertThreshold(
@@ -61,18 +105,26 @@ export class AdvancedNotificationsService {
       'id' | 'userId' | 'createdAt' | 'updatedAt'
     >,
   ): Promise<AlertThreshold> {
-    return this.firebaseService.addSubcollectionDocument<AlertThreshold>(
-      'users',
-      userId,
-      'alertThresholds',
-      {
-        userId,
-        ...thresholdData,
-        isActive: true,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('alert_thresholds')
+      .insert({
+        user_id: userId,
+        category_id: thresholdData.categoryId,
+        days_before_expiration: thresholdData.daysBeforeExpiration,
+        alert_level: thresholdData.alertLevel,
+        is_active: true,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create alert threshold: ${error.message}`);
+    }
+
+    return rowToAlertThreshold(data);
   }
 
   async updateAlertThreshold(
@@ -80,57 +132,83 @@ export class AdvancedNotificationsService {
     thresholdId: string,
     updates: Partial<Omit<AlertThreshold, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<AlertThreshold> {
-    return this.firebaseService.updateSubcollectionDocument<AlertThreshold>(
-      'users',
-      userId,
-      'alertThresholds',
-      thresholdId,
-      {
-        ...updates,
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
+    if (updates.daysBeforeExpiration !== undefined) updateData.days_before_expiration = updates.daysBeforeExpiration;
+    if (updates.alertLevel !== undefined) updateData.alert_level = updates.alertLevel;
+    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
+
+    const { data, error } = await this.supabase
+      .from('alert_thresholds')
+      .update(updateData)
+      .eq('id', thresholdId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update alert threshold: ${error.message}`);
+    }
+
+    return rowToAlertThreshold(data);
   }
 
   async deleteAlertThreshold(
     userId: string,
     thresholdId: string,
   ): Promise<void> {
-    await this.firebaseService.deleteSubcollectionDocument(
-      'users',
-      userId,
-      'alertThresholds',
-      thresholdId,
-    );
+    const { error } = await this.supabase
+      .from('alert_thresholds')
+      .delete()
+      .eq('id', thresholdId)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to delete alert threshold: ${error.message}`);
+    }
   }
 
   async getLowStockAlerts(userId: string): Promise<LowStockAlert[]> {
-    return this.firebaseService.getSubcollection<LowStockAlert>(
-      'users',
-      userId,
-      'lowStockAlerts',
-      {
-        where: [{ field: 'isActive', operator: '==', value: true }],
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('low_stock_alerts')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (error) {
+      throw new Error(`Failed to get low stock alerts: ${error.message}`);
+    }
+
+    return (data || []).map(rowToLowStockAlert);
   }
 
   async createLowStockAlert(
     userId: string,
     alertData: Omit<LowStockAlert, 'id' | 'userId' | 'createdAt' | 'updatedAt'>,
   ): Promise<LowStockAlert> {
-    return this.firebaseService.addSubcollectionDocument<LowStockAlert>(
-      'users',
-      userId,
-      'lowStockAlerts',
-      {
-        userId,
-        ...alertData,
-        isActive: true,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('low_stock_alerts')
+      .insert({
+        user_id: userId,
+        supply_id: alertData.supplyId,
+        supply_name: alertData.supplyName,
+        minimum_quantity: alertData.minimumQuantity,
+        is_active: true,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create low stock alert: ${error.message}`);
+    }
+
+    return rowToLowStockAlert(data);
   }
 
   async updateLowStockAlert(
@@ -138,39 +216,52 @@ export class AdvancedNotificationsService {
     alertId: string,
     updates: Partial<Omit<LowStockAlert, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<LowStockAlert> {
-    return this.firebaseService.updateSubcollectionDocument<LowStockAlert>(
-      'users',
-      userId,
-      'lowStockAlerts',
-      alertId,
-      {
-        ...updates,
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.supplyId !== undefined) updateData.supply_id = updates.supplyId;
+    if (updates.supplyName !== undefined) updateData.supply_name = updates.supplyName;
+    if (updates.minimumQuantity !== undefined) updateData.minimum_quantity = updates.minimumQuantity;
+    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
+
+    const { data, error } = await this.supabase
+      .from('low_stock_alerts')
+      .update(updateData)
+      .eq('id', alertId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update low stock alert: ${error.message}`);
+    }
+
+    return rowToLowStockAlert(data);
   }
 
   async deleteLowStockAlert(userId: string, alertId: string): Promise<void> {
-    await this.firebaseService.deleteSubcollectionDocument(
-      'users',
-      userId,
-      'lowStockAlerts',
-      alertId,
-    );
+    const { error } = await this.supabase
+      .from('low_stock_alerts')
+      .delete()
+      .eq('id', alertId)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to delete low stock alert: ${error.message}`);
+    }
   }
 
   async getNotificationPreferences(
     userId: string,
   ): Promise<NotificationPreferences | null> {
-    const prefs =
-      await this.firebaseService.getSubcollectionDocument<NotificationPreferences>(
-        'users',
-        userId,
-        'notificationPreferences',
-        'preferences',
-      );
+    const { data, error } = await this.supabase
+      .from('notification_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
-    if (!prefs) {
+    if (error || !data) {
       // Return defaults
       return {
         userId,
@@ -180,54 +271,67 @@ export class AdvancedNotificationsService {
         expirationAlertsEnabled: true,
         lowStockAlertsEnabled: true,
         usageRemindersEnabled: false,
-        updatedAt: Timestamp.now(),
+        updatedAt: new Date(),
       };
     }
 
-    return prefs;
+    return rowToNotificationPreferences(data);
   }
 
   async updateNotificationPreferences(
     userId: string,
     preferences: Partial<Omit<NotificationPreferences, 'userId' | 'updatedAt'>>,
   ): Promise<NotificationPreferences> {
-    const existing = await this.firebaseService.getSubcollectionDocument(
-      'users',
-      userId,
-      'notificationPreferences',
-      'preferences',
-    );
-    const now = Timestamp.now();
+    const existing = await this.getNotificationPreferences(userId);
+    const now = new Date();
 
-    if (!existing) {
-      return this.firebaseService.setSubcollectionDocument<NotificationPreferences>(
-        'users',
-        userId,
-        'notificationPreferences',
-        'preferences',
-        {
-          userId,
-          emailEnabled: true,
-          pushEnabled: true,
-          emailFrequency: 'immediate',
-          expirationAlertsEnabled: true,
-          lowStockAlertsEnabled: true,
-          usageRemindersEnabled: false,
-          ...preferences,
-          updatedAt: now,
-        },
-      );
+    const updateData: any = {
+      updated_at: now.toISOString(),
+    };
+
+    if (preferences.emailEnabled !== undefined) updateData.email_enabled = preferences.emailEnabled;
+    if (preferences.pushEnabled !== undefined) updateData.push_enabled = preferences.pushEnabled;
+    if (preferences.emailFrequency !== undefined) updateData.email_frequency = preferences.emailFrequency;
+    if (preferences.expirationAlertsEnabled !== undefined) updateData.expiration_alerts_enabled = preferences.expirationAlertsEnabled;
+    if (preferences.lowStockAlertsEnabled !== undefined) updateData.low_stock_alerts_enabled = preferences.lowStockAlertsEnabled;
+    if (preferences.usageRemindersEnabled !== undefined) updateData.usage_reminders_enabled = preferences.usageRemindersEnabled;
+
+    if (!existing || !existing.updatedAt) {
+      // Create new preferences
+      const { data, error } = await this.supabase
+        .from('notification_preferences')
+        .insert({
+          user_id: userId,
+          email_enabled: preferences.emailEnabled ?? true,
+          push_enabled: preferences.pushEnabled ?? true,
+          email_frequency: preferences.emailFrequency ?? 'immediate',
+          expiration_alerts_enabled: preferences.expirationAlertsEnabled ?? true,
+          low_stock_alerts_enabled: preferences.lowStockAlertsEnabled ?? true,
+          usage_reminders_enabled: preferences.usageRemindersEnabled ?? false,
+          updated_at: now.toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to create notification preferences: ${error.message}`);
+      }
+
+      return rowToNotificationPreferences(data);
     } else {
-      return this.firebaseService.updateSubcollectionDocument<NotificationPreferences>(
-        'users',
-        userId,
-        'notificationPreferences',
-        'preferences',
-        {
-          ...preferences,
-          updatedAt: now,
-        },
-      );
+      // Update existing preferences
+      const { data, error } = await this.supabase
+        .from('notification_preferences')
+        .update(updateData)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to update notification preferences: ${error.message}`);
+      }
+
+      return rowToNotificationPreferences(data);
     }
   }
 }

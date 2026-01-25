@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { PushNotificationService } from './push-notification.service';
 import { NotificationsService } from './notifications.service';
 import { UsersService } from '../users/users.service';
@@ -10,11 +11,11 @@ const logger = new Logger('ExpirationNotificationsService');
 
 interface InventoryItem {
   id: string;
-  userId: string;
-  supplyName: string;
-  expirationDate?: Timestamp;
+  user_id: string;
+  supply_name: string;
+  expiration_date?: string;
   status: 'active' | 'expired' | 'used' | 'disposed';
-  sentNotifications?: string[]; // Array of days (e.g., ['60', '30', '10', '1'])
+  sent_notifications?: string[]; // Array of days (e.g., ['60', '30', '10', '1'])
 }
 
 @Injectable()
@@ -22,7 +23,7 @@ export class ExpirationNotificationsService {
   private readonly alertDays = [60, 30, 10, 1]; // Days before expiration to send alerts
 
   constructor(
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly pushNotificationService: PushNotificationService,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
@@ -40,35 +41,43 @@ export class ExpirationNotificationsService {
       const now = new Date();
       let totalNotificationsSent = 0;
 
-      // Get all active inventory items with expiration dates
-      const allUsers = await this.firebaseService.getCollection('users');
+      // Get all active users
+      const { data: users, error: usersError } = await this.supabase
+        .from('users')
+        .select('id')
+        .eq('is_active', true);
 
-      for (const user of allUsers) {
+      if (usersError) {
+        logger.error(`Error getting users: ${usersError.message}`);
+        return;
+      }
+
+      for (const user of users || []) {
         const userId = user.id;
 
         const isPremium = await this.usersService.isPremiumUser(userId);
 
-        const items =
-          await this.firebaseService.getSubcollection<InventoryItem>(
-            'users',
-            userId,
-            'inventoryItems',
-            {
-              where: [
-                { field: 'status', operator: '==', value: 'active' },
-                { field: 'expirationDate', operator: '!=', value: null },
-              ],
-            },
-          );
+        // Get active inventory items with expiration dates
+        const { data: items, error: itemsError } = await this.supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .not('expiration_date', 'is', null);
+
+        if (itemsError) {
+          logger.error(`Error getting items for user ${userId}: ${itemsError.message}`);
+          continue;
+        }
 
         // For free users, only allow up to N active expiration notifications
         const maxFreeReminders = 10;
         let remindersCreatedForUser = 0;
 
-        for (const item of items) {
-          if (!item.expirationDate) continue;
+        for (const item of items || []) {
+          if (!item.expiration_date) continue;
 
-          const expirationDate = item.expirationDate.toDate();
+          const expirationDate = new Date(item.expiration_date);
           const daysUntilExpiration = Math.ceil(
             (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
           );
@@ -100,7 +109,7 @@ export class ExpirationNotificationsService {
                 totalNotificationsSent++;
                 remindersCreatedForUser++;
                 logger.log(
-                  `Sent ${alertDays}-day expiration notification for item ${item.id} (${item.supplyName})`,
+                  `Sent ${alertDays}-day expiration notification for item ${item.id} (${item.supply_name})`,
                 );
               } catch (error) {
                 logger.error(
@@ -129,7 +138,7 @@ export class ExpirationNotificationsService {
     item: InventoryItem,
     alertDays: number,
   ): boolean {
-    const sentNotifications = item.sentNotifications || [];
+    const sentNotifications = item.sent_notifications || [];
     return sentNotifications.includes(String(alertDays));
   }
 
@@ -141,29 +150,27 @@ export class ExpirationNotificationsService {
     userId: string,
     alertDays: number,
   ): Promise<void> {
-    const item = await this.firebaseService.getSubcollectionDocument(
-      'users',
-      userId,
-      'inventoryItems',
-      itemId,
-    );
+    const { data: item } = await this.supabase
+      .from('inventory_items')
+      .select('sent_notifications')
+      .eq('id', itemId)
+      .eq('user_id', userId)
+      .single();
 
     if (!item) {
       return;
     }
 
-    const currentSent = (item.sentNotifications as string[]) || [];
+    const currentSent = (item.sent_notifications as string[]) || [];
     const updatedSent = [...new Set([...currentSent, String(alertDays)])];
 
-    await this.firebaseService.updateSubcollectionDocument(
-      'users',
-      userId,
-      'inventoryItems',
-      itemId,
-      {
-        sentNotifications: updatedSent,
-      },
-    );
+    await this.supabase
+      .from('inventory_items')
+      .update({
+        sent_notifications: updatedSent,
+      })
+      .eq('id', itemId)
+      .eq('user_id', userId);
   }
 
   /**
@@ -181,24 +188,24 @@ export class ExpirationNotificationsService {
 
     // Send push notification
     await this.pushNotificationService.sendExpirationNotification(
-      item.userId,
-      item.supplyName,
+      item.user_id,
+      item.supply_name,
       actualDaysUntilExpiration,
       item.id,
     );
 
     // Create in-app notification
-    await this.notificationsService.createNotification(item.userId, {
+    await this.notificationsService.createNotification(item.user_id, {
       type: 'expiration',
       title: 'Item Expiring Soon',
-      message: `${item.supplyName} expires in ${daysText}`,
+      message: `${item.supply_name} expires in ${daysText}`,
       data: {
         itemId: item.id,
         daysUntilExpiration: actualDaysUntilExpiration,
         alertThreshold: alertDays,
       },
       isRead: false,
-      sentAt: Timestamp.now(),
+      sentAt: new Date(),
     });
   }
 

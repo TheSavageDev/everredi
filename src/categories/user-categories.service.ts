@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 
 export interface UserCategory {
@@ -11,28 +12,44 @@ export interface UserCategory {
   icon?: string;
   color?: string;
   order?: number;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Helper function to convert PostgreSQL row to UserCategory
+function rowToUserCategory(row: any): UserCategory {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    description: row.description,
+    icon: row.icon_name,
+    order: row.sort_order,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 @Injectable()
 export class UserCategoriesService {
   constructor(
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
   ) {}
 
   async getUserCategories(userId: string): Promise<UserCategory[]> {
-    const categories =
-      await this.firebaseService.getSubcollection<UserCategory>(
-        'users',
-        userId,
-        'userCategories',
-        {
-          orderBy: { field: 'order', direction: 'asc' },
-        },
-      );
-    // Secondary sort by name (Firestore only supports one orderBy, so we do it in memory)
+    const { data, error } = await this.supabase
+      .from('user_categories')
+      .select('*')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to get user categories: ${error.message}`);
+    }
+
+    const categories = (data || []).map(rowToUserCategory);
+    // Secondary sort by name (if sort_order is the same)
     return categories.sort((a, b) => {
       if ((a.order || 0) !== (b.order || 0))
         return (a.order || 0) - (b.order || 0);
@@ -44,12 +61,18 @@ export class UserCategoriesService {
     userId: string,
     categoryId: string,
   ): Promise<UserCategory | null> {
-    return this.firebaseService.getSubcollectionDocument<UserCategory>(
-      'users',
-      userId,
-      'userCategories',
-      categoryId,
-    );
+    const { data, error } = await this.supabase
+      .from('user_categories')
+      .select('*')
+      .eq('id', categoryId)
+      .eq('user_id', userId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return rowToUserCategory(data);
   }
 
   async createUserCategory(
@@ -59,7 +82,7 @@ export class UserCategoriesService {
       'id' | 'userId' | 'createdAt' | 'updatedAt'
     >,
   ): Promise<UserCategory> {
-    const now = Timestamp.now();
+    const now = new Date();
 
     // Get current max order
     const existingCategories = await this.getUserCategories(userId);
@@ -68,18 +91,25 @@ export class UserCategoriesService {
       0,
     );
 
-    return this.firebaseService.addSubcollectionDocument<UserCategory>(
-      'users',
-      userId,
-      'userCategories',
-      {
-        userId,
-        ...categoryData,
-        order: categoryData.order ?? maxOrder + 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('user_categories')
+      .insert({
+        user_id: userId,
+        name: categoryData.name,
+        description: categoryData.description,
+        icon_name: categoryData.icon,
+        sort_order: categoryData.order ?? maxOrder + 1,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create user category: ${error.message}`);
+    }
+
+    return rowToUserCategory(data);
   }
 
   async updateUserCategory(
@@ -87,43 +117,66 @@ export class UserCategoriesService {
     categoryId: string,
     updates: Partial<Omit<UserCategory, 'id' | 'userId' | 'createdAt'>>,
   ): Promise<UserCategory> {
-    return this.firebaseService.updateSubcollectionDocument<UserCategory>(
-      'users',
-      userId,
-      'userCategories',
-      categoryId,
-      {
-        ...updates,
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.icon !== undefined) updateData.icon_name = updates.icon;
+    if (updates.order !== undefined) updateData.sort_order = updates.order;
+
+    const { data, error } = await this.supabase
+      .from('user_categories')
+      .update(updateData)
+      .eq('id', categoryId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        throw new Error('User category not found');
+      }
+      throw new Error(`Failed to update user category: ${error.message}`);
+    }
+
+    return rowToUserCategory(data);
   }
 
   async deleteUserCategory(userId: string, categoryId: string): Promise<void> {
-    await this.firebaseService.deleteSubcollectionDocument(
-      'users',
-      userId,
-      'userCategories',
-      categoryId,
-    );
+    const { error } = await this.supabase
+      .from('user_categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('user_id', userId);
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        throw new Error('User category not found');
+      }
+      throw new Error(`Failed to delete user category: ${error.message}`);
+    }
   }
 
   async reorderCategories(
     userId: string,
     categoryIds: string[],
   ): Promise<void> {
-    const batch = this.firebaseService.createBatch();
+    // Update each category's order
+    for (let index = 0; index < categoryIds.length; index++) {
+      const { error } = await this.supabase
+        .from('user_categories')
+        .update({
+          sort_order: index,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', categoryIds[index])
+        .eq('user_id', userId);
 
-    categoryIds.forEach((categoryId, index) => {
-      const ref = this.firebaseService.getSubcollectionDocumentRef(
-        'users',
-        userId,
-        'userCategories',
-        categoryId,
-      );
-      batch.update(ref, { order: index, updatedAt: Timestamp.now() });
-    });
-
-    await batch.commit();
+      if (error) {
+        throw new Error(`Failed to reorder category ${categoryIds[index]}: ${error.message}`);
+      }
+    }
   }
 }

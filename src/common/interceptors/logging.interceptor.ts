@@ -23,7 +23,8 @@ export class LoggingInterceptor implements NestInterceptor {
     // Log all requests, especially auth endpoints
     if (url?.includes('/auth/')) {
       const hasAuth = request.headers.authorization ? 'YES' : 'NO';
-      const userAgent = request.headers['user-agent']?.substring(0, 50) || 'unknown';
+      const userAgent =
+        request.headers['user-agent']?.substring(0, 50) || 'unknown';
       this.logger.log(
         `[${timestamp}] 📥 INCOMING REQUEST: ${method} ${url} from ${ip} - Auth header: ${hasAuth} - UserAgent: ${userAgent}`,
       );
@@ -54,7 +55,8 @@ export class LoggingInterceptor implements NestInterceptor {
 
         // Log auth endpoint responses
         if (url?.includes('/auth/')) {
-          const statusEmoji = statusCode >= 400 ? '❌' : statusCode >= 300 ? '⚠️' : '✅';
+          const statusEmoji =
+            statusCode >= 400 ? '❌' : statusCode >= 300 ? '⚠️' : '✅';
           this.logger.log(
             `[${timestamp}] ${statusEmoji} RESPONSE: ${method} ${url} - Status: ${statusCode} - Duration: ${duration}ms`,
           );

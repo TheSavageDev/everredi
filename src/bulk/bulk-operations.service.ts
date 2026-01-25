@@ -1,7 +1,7 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 import {
   InventoryService,
@@ -23,7 +23,7 @@ export interface BulkUpdateRequest {
 @Injectable()
 export class BulkOperationsService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
     private readonly inventoryService: InventoryService,
     private readonly userKitsService: UserKitsService,
@@ -117,41 +117,33 @@ export class BulkOperationsService {
   async exportInventory(
     userId: string,
   ): Promise<Array<Record<string, unknown>>> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('inventoryItems')
-      .get();
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('user_id', userId);
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data() as {
-        supplyName?: string;
-        supplyId?: string;
-        locationId?: string;
-        quantity?: number;
-        status?: string;
-        expirationDate?: Timestamp;
-        purchaseDate?: Timestamp;
-        purchasePrice?: number;
-        supplier?: string;
-        notes?: string;
-        supplyCategoryId?: string;
-      };
-      return {
-        id: doc.id,
-        supplyName: data.supplyName,
-        supplyId: data.supplyId,
-        locationId: data.locationId,
-        quantity: data.quantity,
-        status: data.status,
-        expirationDate: data.expirationDate?.toDate().toISOString(),
-        purchaseDate: data.purchaseDate?.toDate().toISOString(),
-        purchasePrice: data.purchasePrice,
-        supplier: data.supplier,
-        notes: data.notes,
-        supplyCategoryId: data.supplyCategoryId,
-      };
-    });
+    if (error) {
+      throw new Error(`Failed to export inventory: ${error.message}`);
+    }
+
+    return (data || []).map((item: any) => ({
+      id: item.id,
+      supplyName: item.supply_name,
+      supplyId: item.supply_id,
+      locationId: item.location_id,
+      quantity: item.quantity,
+      status: item.status,
+      expirationDate: item.expiration_date
+        ? new Date(item.expiration_date).toISOString()
+        : undefined,
+      purchaseDate: item.purchase_date
+        ? new Date(item.purchase_date).toISOString()
+        : undefined,
+      purchasePrice: item.purchase_price,
+      supplier: item.supplier,
+      notes: item.notes,
+      supplyCategoryId: item.supply_category_id,
+    }));
   }
 
   async exportKits(userId: string): Promise<Array<Record<string, unknown>>> {
@@ -190,40 +182,49 @@ export class BulkOperationsService {
     for (const itemId of request.itemIds) {
       try {
         // Verify item belongs to user
-        const itemDoc = await this.firestore
-          .collection('users')
-          .doc(userId)
-          .collection('inventoryItems')
-          .doc(itemId)
-          .get();
+        const { data: item, error: fetchError } = await this.supabase
+          .from('inventory_items')
+          .select('id')
+          .eq('id', itemId)
+          .eq('user_id', userId)
+          .single();
 
-        if (!itemDoc.exists) {
+        if (fetchError || !item) {
           failed++;
           continue;
         }
 
         // Prepare update data
-        const updateData: Record<string, unknown> = {
-          updatedAt: Timestamp.now(),
+        const updateData: any = {
+          updated_at: new Date().toISOString(),
         };
 
         if (request.updates.status !== undefined) {
           updateData.status = request.updates.status;
         }
         if (request.updates.locationId !== undefined) {
-          updateData.locationId = request.updates.locationId;
+          updateData.location_id = request.updates.locationId;
         }
         if (request.updates.expirationDate !== undefined) {
           const expirationDateValue = request.updates.expirationDate;
           if (typeof expirationDateValue === 'string') {
-            updateData.expirationDate = this.parseDate(expirationDateValue);
-          } else if (expirationDateValue instanceof Timestamp) {
-            updateData.expirationDate = expirationDateValue;
+            updateData.expiration_date = new Date(expirationDateValue).toISOString();
+          } else if (expirationDateValue instanceof Date) {
+            updateData.expiration_date = expirationDateValue.toISOString();
           }
         }
 
-        await itemDoc.ref.update(updateData);
-        updated++;
+        const { error: updateError } = await this.supabase
+          .from('inventory_items')
+          .update(updateData)
+          .eq('id', itemId)
+          .eq('user_id', userId);
+
+        if (updateError) {
+          failed++;
+        } else {
+          updated++;
+        }
       } catch {
         failed++;
       }
@@ -271,22 +272,22 @@ export class BulkOperationsService {
     return newKit;
   }
 
-  private parseDate(dateValue: any): Timestamp | undefined {
+  private parseDate(dateValue: any): Date | undefined {
     if (!dateValue) return undefined;
 
-    if (dateValue instanceof Timestamp) {
+    if (dateValue instanceof Date) {
       return dateValue;
     }
 
     if (typeof dateValue === 'string') {
       const date = new Date(dateValue);
       if (!isNaN(date.getTime())) {
-        return Timestamp.fromDate(date);
+        return date;
       }
     }
 
     if (dateValue instanceof Date) {
-      return Timestamp.fromDate(dateValue);
+      return dateValue;
     }
 
     return undefined;

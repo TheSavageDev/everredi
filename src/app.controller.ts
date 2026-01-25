@@ -22,7 +22,7 @@ export class AppController {
       service: 'everredi-api',
       environment: process.env.NODE_ENV || 'development',
       config: {
-        firebase: configStatus.firebase.configured,
+        supabase: configStatus.supabase.configured,
         stripe: configStatus.stripe.configured,
         gemini: configStatus.gemini.configured,
       },

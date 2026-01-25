@@ -17,9 +17,8 @@ export class EnvValidationService {
 
     // Required environment variables
     const required = [
-      'FIREBASE_PROJECT_ID',
-      'FIREBASE_PRIVATE_KEY',
-      'FIREBASE_CLIENT_EMAIL',
+      'SUPABASE_URL',
+      'SUPABASE_SECRET_KEY',
     ];
 
     // Check required vars
@@ -54,17 +53,16 @@ export class EnvValidationService {
   }
 
   getConfigStatus(): {
-    firebase: { configured: boolean; projectId?: string };
+    supabase: { configured: boolean; url?: string };
     stripe: { configured: boolean };
     gemini: { configured: boolean };
   } {
     return {
-      firebase: {
+      supabase: {
         configured:
-          !!this.configService.get<string>('FIREBASE_PROJECT_ID') &&
-          !!this.configService.get<string>('FIREBASE_PRIVATE_KEY') &&
-          !!this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
-        projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
+          !!this.configService.get<string>('SUPABASE_URL') &&
+          !!this.configService.get<string>('SUPABASE_SECRET_KEY'),
+        url: this.configService.get<string>('SUPABASE_URL'),
       },
       stripe: {
         configured:

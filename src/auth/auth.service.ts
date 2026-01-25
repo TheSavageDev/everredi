@@ -6,12 +6,12 @@ export class AuthService {
   constructor(private readonly usersService: UsersService) {}
 
   async createOrUpdateUser(
-    firebaseUid: string,
+    userId: string,
     email: string,
     displayName?: string,
   ) {
     return this.usersService.createOrUpdateUser(
-      firebaseUid,
+      userId,
       email,
       displayName,
     );

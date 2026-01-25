@@ -2,48 +2,34 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { AiService } from '../ai.service';
 import { UsersService } from '../../users/users.service';
-import type { firestore } from 'firebase-admin';
-import { FIRESTORE } from '../../config/firebase.provider';
+import { SUPABASE } from '../../config/supabase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 describe('AiService (integration)', () => {
   let moduleRef: TestingModule;
   let service: AiService;
 
-  const firestoreMock = {
-    collection: jest.fn().mockReturnValue({
-      doc: jest.fn().mockReturnValue({
-        collection: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnThis(),
-          orderBy: jest.fn().mockReturnThis(),
-          limit: jest.fn().mockReturnThis(),
-          get: jest.fn().mockResolvedValue({
-            size: 0,
-            docs: [],
-          }),
-          add: jest.fn().mockResolvedValue({
-            id: 'rec-1',
-            get: jest.fn().mockResolvedValue({
-              id: 'rec-1',
-              data: () => ({
-                userId: 'user-1',
-                recommendedItems: [],
-              }),
-            }),
+  const supabaseMock = {
+    from: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          gte: jest.fn().mockReturnValue({
+            count: 0,
+            error: null,
           }),
         }),
       }),
     }),
-  } as unknown as firestore.Firestore;
+  } as unknown as SupabaseClient;
 
   const usersServiceMock: Partial<UsersService> = {
     getUserById: jest.fn().mockResolvedValue({
       id: 'user-1',
-      firebaseUid: 'user-1',
       email: 'test@example.com',
       subscriptionTier: 'free',
       subscriptionStatus: 'active',
-      createdAt: {} as firestore.Timestamp,
-      updatedAt: {} as firestore.Timestamp,
+      createdAt: new Date(),
+      updatedAt: new Date(),
       isActive: true,
     }),
   };
@@ -58,8 +44,8 @@ describe('AiService (integration)', () => {
           useValue: usersServiceMock,
         },
         {
-          provide: FIRESTORE,
-          useValue: firestoreMock,
+          provide: SUPABASE,
+          useValue: supabaseMock,
         },
       ],
     }).compile();

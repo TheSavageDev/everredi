@@ -1,11 +1,11 @@
 import { Controller, Post, Body, UseGuards, Get, Query } from '@nestjs/common';
 import { AffiliateTrackingService } from './affiliate-tracking.service';
 import type { TrackClickDto } from './affiliate-tracking.service';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('affiliate')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class AffiliateController {
   constructor(
     private readonly affiliateTrackingService: AffiliateTrackingService,

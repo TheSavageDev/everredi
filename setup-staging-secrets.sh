@@ -72,47 +72,49 @@ create_secret() {
 echo "=== Required Secrets ==="
 echo ""
 
-# Firebase credentials
-echo "Firebase Configuration:"
-echo "You can get these from your Firebase service account JSON key file"
+# Supabase Configuration (Required)
+echo "Supabase Configuration (Required):"
+echo "Get these from your Supabase project dashboard → Project Settings → API"
 echo ""
 
 # Try to read from existing dev secrets as reference
-if gcloud secrets describe firebase-private-key-dev --project=$PROJECT_ID &>/dev/null 2>&1; then
-  echo "Found dev secrets. You can use the same values for staging, or enter new ones."
-  read -p "Use same Firebase credentials as dev? (y/n) [default: n]: " USE_DEV
-  if [ "$USE_DEV" = "y" ] || [ "$USE_DEV" = "Y" ]; then
-    echo "Copying from dev secrets..."
-    DEV_PRIVATE_KEY=$(gcloud secrets versions access latest --secret=firebase-private-key-dev --project=$PROJECT_ID)
-    DEV_CLIENT_EMAIL=$(gcloud secrets versions access latest --secret=firebase-client-email-dev --project=$PROJECT_ID)
+# Note: Dev and staging share the same Supabase project, so they should use the same credentials
+if gcloud secrets describe supabase-url-dev --project=$PROJECT_ID &>/dev/null 2>&1; then
+  echo "Found dev secrets. Staging should use the same Supabase project as dev."
+  read -p "Copy Supabase credentials from dev? (y/n) [default: y]: " USE_DEV
+  if [ "$USE_DEV" != "n" ] && [ "$USE_DEV" != "N" ]; then
+    echo "Copying from dev secrets (dev and staging share the same Supabase project)..."
+    DEV_SUPABASE_URL=$(gcloud secrets versions access latest --secret=supabase-url-dev --project=$PROJECT_ID)
+    DEV_SUPABASE_KEY=$(gcloud secrets versions access latest --secret=supabase-secret-key-dev --project=$PROJECT_ID)
     
     # Create staging secrets with dev values
-    echo -n "$DEV_PRIVATE_KEY" | gcloud secrets create firebase-private-key-${ENV} \
+    echo -n "$DEV_SUPABASE_URL" | gcloud secrets create supabase-url-${ENV} \
       --project=$PROJECT_ID \
       --data-file=- \
       --replication-policy="automatic" \
       --labels="app=everredi-api,environment=${ENV}" 2>/dev/null || \
-    echo -n "$DEV_PRIVATE_KEY" | gcloud secrets versions add firebase-private-key-${ENV} \
+    echo -n "$DEV_SUPABASE_URL" | gcloud secrets versions add supabase-url-${ENV} \
       --project=$PROJECT_ID \
       --data-file=-
     
-    echo -n "$DEV_CLIENT_EMAIL" | gcloud secrets create firebase-client-email-${ENV} \
+    echo -n "$DEV_SUPABASE_KEY" | gcloud secrets create supabase-secret-key-${ENV} \
       --project=$PROJECT_ID \
       --data-file=- \
       --replication-policy="automatic" \
       --labels="app=everredi-api,environment=${ENV}" 2>/dev/null || \
-    echo -n "$DEV_CLIENT_EMAIL" | gcloud secrets versions add firebase-client-email-${ENV} \
+    echo -n "$DEV_SUPABASE_KEY" | gcloud secrets versions add supabase-secret-key-${ENV} \
       --project=$PROJECT_ID \
       --data-file=-
     
-    echo "  ✅ Copied Firebase credentials from dev"
+    echo "  ✅ Copied Supabase credentials from dev (shared Supabase project)"
   else
-    create_secret "firebase-private-key-${ENV}" "Firebase Private Key" "Firebase service account private key (from JSON key file)" "true"
-    create_secret "firebase-client-email-${ENV}" "Firebase Client Email" "Firebase service account email (e.g., firebase-adminsdk-xxxxx@project-id.iam.gserviceaccount.com)" "false"
+    create_secret "supabase-url-${ENV}" "Supabase Project URL" "Supabase project URL (should match dev: https://xxxxx.supabase.co)" "false"
+    create_secret "supabase-secret-key-${ENV}" "Supabase Service Role Key" "Supabase service role key (should match dev)" "true"
   fi
 else
-  create_secret "firebase-private-key-${ENV}" "Firebase Private Key" "Firebase service account private key (from JSON key file)" "true"
-  create_secret "firebase-client-email-${ENV}" "Firebase Client Email" "Firebase service account email (e.g., firebase-adminsdk-xxxxx@project-id.iam.gserviceaccount.com)" "false"
+  echo "Note: Dev and staging share the same Supabase project. Use the same URL and key for both."
+  create_secret "supabase-url-${ENV}" "Supabase Project URL" "Supabase project URL (e.g., https://xxxxx.supabase.co) - use same as dev" "false"
+  create_secret "supabase-secret-key-${ENV}" "Supabase Service Role Key" "Supabase service role key (format: sb_secret_... or legacy service_role key) - use same as dev" "true"
 fi
 
 echo ""
@@ -148,10 +150,16 @@ fi
 echo ""
 
 # RevenueCat (optional but recommended for mobile subscriptions)
-echo "RevenueCat Configuration (optional - press Enter to skip):"
+echo "RevenueCat Configuration:"
+echo "Required if you're using mobile app subscriptions. Optional for web-only deployments."
 read -p "Set up RevenueCat secrets? (y/n) [default: n]: " SETUP_REVENUECAT
 if [ "$SETUP_REVENUECAT" = "y" ] || [ "$SETUP_REVENUECAT" = "Y" ]; then
-  create_secret "revenuecat-secret-api-key-${ENV}" "RevenueCat Secret API Key" "RevenueCat secret API key (from RevenueCat dashboard → API Keys)" "true"
+  create_secret "revenuecat-secret-api-key-${ENV}" "RevenueCat Secret API Key" "RevenueCat secret API key (from RevenueCat dashboard → API Keys → Secret API Key)" "true"
+  echo ""
+  read -p "Set up RevenueCat webhook secret? (y/n) [default: n]: " SETUP_REVENUECAT_WEBHOOK
+  if [ "$SETUP_REVENUECAT_WEBHOOK" = "y" ] || [ "$SETUP_REVENUECAT_WEBHOOK" = "Y" ]; then
+    create_secret "revenuecat-webhook-secret-${ENV}" "RevenueCat Webhook Secret" "RevenueCat webhook verification secret (generate with: openssl rand -hex 32)" "true"
+  fi
 else
   echo "Skipping RevenueCat secrets (you can add them later)"
   # Create empty secret so deployment doesn't fail
@@ -169,7 +177,7 @@ echo "Service Account: ${SERVICE_ACCOUNT}"
 echo ""
 
 # Grant access to all staging secrets
-for secret in firebase-private-key firebase-client-email gemini-api-key stripe-secret-key stripe-webhook-secret revenuecat-secret-api-key; do
+for secret in supabase-url supabase-secret-key gemini-api-key stripe-secret-key stripe-webhook-secret revenuecat-secret-api-key revenuecat-webhook-secret; do
   secret_name="${secret}-${ENV}"
   if gcloud secrets describe $secret_name --project=$PROJECT_ID &>/dev/null; then
     echo "Granting access to: $secret_name"
@@ -184,12 +192,13 @@ echo ""
 echo "✅ Staging secrets setup complete!"
 echo ""
 echo "Secrets created:"
-echo "  - firebase-private-key-${ENV}"
-echo "  - firebase-client-email-${ENV}"
-echo "  - gemini-api-key-${ENV}"
+echo "  - supabase-url-${ENV} (required)"
+echo "  - supabase-secret-key-${ENV} (required)"
+echo "  - gemini-api-key-${ENV} (required)"
 echo "  - stripe-secret-key-${ENV} (if configured)"
 echo "  - stripe-webhook-secret-${ENV} (if configured)"
 echo "  - revenuecat-secret-api-key-${ENV} (if configured)"
+echo "  - revenuecat-webhook-secret-${ENV} (if configured)"
 echo ""
 echo "To update a secret later, use:"
 echo "  echo -n 'NEW_VALUE' | gcloud secrets versions add SECRET_NAME --data-file=-"

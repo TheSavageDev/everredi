@@ -9,7 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import {
   BrandPartnershipsService,
@@ -23,16 +23,10 @@ export class BrandPartnershipsController {
   ) {}
 
   @Get()
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async getPartnerships(@Query('categoryIds') categoryIds?: string) {
-    const categoryIdsArray = categoryIds
-      ? categoryIds.split(',').filter((id) => id.trim())
-      : undefined;
-
     const partnerships =
-      await this.brandPartnershipsService.getActivePartnerships(
-        categoryIdsArray,
-      );
+      await this.brandPartnershipsService.getActivePartnerships();
     return {
       success: true,
       data: partnerships,
@@ -42,7 +36,7 @@ export class BrandPartnershipsController {
   }
 
   @Get('all')
-  @UseGuards(FirebaseAuthGuard, AdminGuard)
+  @UseGuards(SupabaseAuthGuard, AdminGuard)
   async getAllPartnerships() {
     const partnerships =
       await this.brandPartnershipsService.getAllPartnerships();
@@ -55,7 +49,7 @@ export class BrandPartnershipsController {
   }
 
   @Get(':id')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async getPartnership(@Param('id') id: string) {
     const partnership = await this.brandPartnershipsService.getPartnership(id);
     if (!partnership) {
@@ -77,7 +71,7 @@ export class BrandPartnershipsController {
   }
 
   @Post()
-  @UseGuards(FirebaseAuthGuard, AdminGuard)
+  @UseGuards(SupabaseAuthGuard, AdminGuard)
   async createPartnership(
     @Body()
     body: {
@@ -93,14 +87,11 @@ export class BrandPartnershipsController {
       endDate?: string;
     },
   ) {
-    const { Timestamp } = await import('firebase-admin/firestore');
     const partnership = await this.brandPartnershipsService.createPartnership({
       ...body,
-      startDate: Timestamp.fromDate(new Date(body.startDate)),
-      endDate: body.endDate
-        ? Timestamp.fromDate(new Date(body.endDate))
-        : undefined,
-    });
+      startDate: new Date(body.startDate),
+      endDate: body.endDate ? new Date(body.endDate) : undefined,
+    } as any);
     return {
       success: true,
       data: partnership,
@@ -110,7 +101,7 @@ export class BrandPartnershipsController {
   }
 
   @Patch(':id')
-  @UseGuards(FirebaseAuthGuard, AdminGuard)
+  @UseGuards(SupabaseAuthGuard, AdminGuard)
   async updatePartnership(
     @Param('id') id: string,
     @Body()
@@ -127,18 +118,17 @@ export class BrandPartnershipsController {
       endDate: string;
     }>,
   ) {
-    const { Timestamp } = await import('firebase-admin/firestore');
     const updates: Partial<
       Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>
     > = {
       ...body,
     } as Partial<Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>>;
     if (body.startDate) {
-      updates.startDate = Timestamp.fromDate(new Date(body.startDate));
+      (updates as any).startDate = new Date(body.startDate);
     }
     if (body.endDate !== undefined) {
-      updates.endDate = body.endDate
-        ? Timestamp.fromDate(new Date(body.endDate))
+      (updates as any).endDate = body.endDate
+        ? new Date(body.endDate)
         : undefined;
     }
 
@@ -155,7 +145,7 @@ export class BrandPartnershipsController {
   }
 
   @Delete(':id')
-  @UseGuards(FirebaseAuthGuard, AdminGuard)
+  @UseGuards(SupabaseAuthGuard, AdminGuard)
   async deletePartnership(@Param('id') id: string) {
     await this.brandPartnershipsService.deletePartnership(id);
     return {

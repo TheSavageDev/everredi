@@ -70,7 +70,7 @@ async function bootstrap() {
       `   CORS_ORIGIN from process.env: ${corsOriginFromEnv || '(not set)'}`,
     );
     logger.log(`   Resolved CORS_ORIGIN: ${corsOrigin}`);
-    
+
     // Log all environment variables that start with CORS for debugging
     const corsEnvVars = Object.keys(process.env)
       .filter((key) => key.toUpperCase().includes('CORS'))
@@ -121,19 +121,14 @@ async function bootstrap() {
         ) => {
           // Allow requests with no origin (e.g., mobile apps, Postman)
           if (!origin) {
-            logger.debug('CORS: Allowing request with no origin');
             callback(null, true);
             return;
           }
 
           const normalizedOrigin = normalizeOrigin(origin);
-          logger.debug(
-            `CORS: Checking origin "${origin}" (normalized: "${normalizedOrigin}")`,
-          );
 
           // Allow if origin is in the explicitly allowed list (case-insensitive)
           if (allowedOrigins.includes(normalizedOrigin)) {
-            logger.debug(`CORS: ✅ Allowed - origin matches allowed list`);
             callback(null, true);
             return;
           }
@@ -145,9 +140,6 @@ async function bootstrap() {
             normalizedOrigin.includes(serviceName.toLowerCase()) &&
             normalizedOrigin.endsWith('.a.run.app')
           ) {
-            logger.debug(
-              `CORS: ✅ Allowed - origin matches Cloud Run service URL pattern`,
-            );
             callback(null, true);
             return;
           }
@@ -185,7 +177,6 @@ async function bootstrap() {
 
           const normalizedOrigin = normalizeOrigin(origin);
           if (allowedOrigins.includes(normalizedOrigin)) {
-            logger.debug(`CORS: ✅ Allowed origin "${origin}"`);
             callback(null, true);
             return;
           }

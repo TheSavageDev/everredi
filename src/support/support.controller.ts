@@ -7,13 +7,13 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SupportService, SupportTicket } from './support.service';
 
 @Controller('support')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard, PremiumGuard)
 export class SupportController {
   constructor(private readonly supportService: SupportService) {}
 

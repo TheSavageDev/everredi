@@ -1,10 +1,9 @@
 import { Injectable, ForbiddenException, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { UsersService } from '../users/users.service';
-import { FIRESTORE } from '../config/firebase.provider';
+import { SUPABASE } from '../config/supabase.provider';
 
 export interface AiRecommendationRequest {
   prompt: string;
@@ -30,7 +29,24 @@ export interface AiRecommendation {
   }>;
   confidenceScore: number;
   wasUsed: boolean;
-  createdAt: Timestamp;
+  createdAt: Date;
+}
+
+// Helper function to convert PostgreSQL row to AiRecommendation
+function rowToAiRecommendation(row: any): AiRecommendation {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    prompt: row.prompt || '',
+    purpose: row.purpose || '',
+    groupSize: row.group_size || 1,
+    environment: row.environment || undefined,
+    skillLevel: row.skill_level || undefined,
+    recommendedItems: row.recommended_items || [],
+    confidenceScore: parseFloat(row.confidence_score) || 0.8,
+    wasUsed: row.was_used || false,
+    createdAt: row.created_at ? new Date(row.created_at) : new Date(),
+  };
 }
 
 @Injectable()
@@ -42,7 +58,7 @@ export class AiService {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
   ) {
     this.apiKey = this.configService.get<string>('GEMINI_API_KEY') || '';
 
@@ -76,16 +92,19 @@ export class AiService {
     // Get usage for current month
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfMonthTimestamp = Timestamp.fromDate(startOfMonth);
 
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('aiRecommendations')
-      .where('createdAt', '>=', startOfMonthTimestamp)
-      .get();
+    const { count, error } = await this.supabase
+      .from('ai_recommendations')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('created_at', startOfMonth.toISOString());
 
-    const used = snapshot.size;
+    if (error) {
+      this.logger.error(`Error checking usage limit: ${error.message}`);
+      return { allowed: false, used: 0, limit: 5 };
+    }
+
+    const used = count || 0;
     const limit = 5; // Free tier limit
 
     return { allowed: used < limit, used, limit };
@@ -150,26 +169,29 @@ Return ONLY the JSON array, no other text.`;
       const recommendedItems: unknown = JSON.parse(jsonMatch[0]);
 
       // Save recommendation
-      const now = Timestamp.now();
-      const docRef = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('aiRecommendations')
-        .add({
-          userId,
+      const now = new Date();
+      const { data, error } = await this.supabase
+        .from('ai_recommendations')
+        .insert({
+          user_id: userId,
           prompt: request.prompt,
           purpose: request.purpose,
-          groupSize: request.groupSize,
+          group_size: request.groupSize,
           environment: request.environment,
-          skillLevel: request.skillLevel,
-          recommendedItems,
-          confidenceScore: 0.8, // TODO: Calculate actual confidence
-          wasUsed: false,
-          createdAt: now,
-        });
+          skill_level: request.skillLevel,
+          recommended_items: recommendedItems,
+          confidence_score: 0.8, // TODO: Calculate actual confidence
+          was_used: false,
+          created_at: now.toISOString(),
+        })
+        .select()
+        .single();
 
-      const doc = await docRef.get();
-      return { id: doc.id, ...doc.data() } as AiRecommendation;
+      if (error) {
+        throw new Error(`Failed to save recommendation: ${error.message}`);
+      }
+
+      return rowToAiRecommendation(data);
     } catch (error: unknown) {
       this.logger.error(
         'AI recommendation error:',
@@ -221,18 +243,35 @@ Return ONLY the JSON array, no other text.`;
   }
 
   async getRecommendations(userId: string): Promise<AiRecommendation[]> {
-    const snapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('aiRecommendations')
-      .orderBy('createdAt', 'desc')
-      .limit(50)
-      .get();
+    try {
+      const { data, error } = await this.supabase
+        .from('ai_recommendations')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as AiRecommendation[];
+      if (error) {
+        this.logger.error(`Failed to get recommendations: ${error.message}`, error);
+        throw new Error(`Failed to get recommendations: ${error.message}`);
+      }
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      return data.map((row) => {
+        try {
+          return rowToAiRecommendation(row);
+        } catch (err) {
+          this.logger.error(`Error mapping recommendation row: ${err instanceof Error ? err.message : String(err)}`, row);
+          throw err;
+        }
+      });
+    } catch (err) {
+      this.logger.error(`Error in getRecommendations: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
   }
 
   /**

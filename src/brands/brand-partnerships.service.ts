@@ -1,149 +1,149 @@
-import { Injectable } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 
 export interface BrandPartnership {
   id: string;
   brandName: string;
-  logoUrl?: string;
-  websiteUrl?: string;
-  description?: string;
-  categoryIds?: string[]; // Which categories this brand applies to
-  isActive: boolean;
-  partnershipType: 'featured' | 'recommended' | 'sponsor';
-  priority: number;
-  startDate: Timestamp;
-  endDate?: Timestamp; // Optional expiration
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  contactEmail?: string;
+  contactName?: string;
+  partnershipType?: string;
+  status: 'active' | 'inactive' | 'pending';
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Helper function to convert PostgreSQL row to BrandPartnership
+function rowToBrandPartnership(row: any): BrandPartnership {
+  return {
+    id: row.id,
+    brandName: row.brand_name,
+    contactEmail: row.contact_email,
+    contactName: row.contact_name,
+    partnershipType: row.partnership_type,
+    status: row.status,
+    notes: row.notes,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 @Injectable()
 export class BrandPartnershipsService {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   /**
-   * Gets all active brand partnerships, optionally filtered by category.
+   * Gets all active brand partnerships.
    *
-   * This method:
-   * - Returns only partnerships where `isActive === true`
-   * - Filters out partnerships that haven't started yet (startDate > now)
-   * - Filters out expired partnerships (endDate < now)
-   * - Optionally filters by category IDs (shows partnerships that match any provided category)
-   * - Sorts by priority (descending) then by partnership type (featured > sponsor > recommended)
-   *
-   * @param categoryIds - Optional array of category IDs to filter partnerships
    * @returns Promise resolving to array of active BrandPartnership objects
-   *
-   * @example
-   * ```typescript
-   * // Get all active partnerships
-   * const all = await service.getActivePartnerships();
-   *
-   * // Get partnerships for specific categories
-   * const medical = await service.getActivePartnerships(['medical', 'first-aid']);
-   * ```
    */
-  async getActivePartnerships(
-    categoryIds?: string[],
-  ): Promise<BrandPartnership[]> {
-    const now = Timestamp.now();
-    let partnerships =
-      await this.firebaseService.getCollection<BrandPartnership>(
-        'brandPartnerships',
-        {
-          where: [
-            { field: 'isActive', operator: '==', value: true },
-            { field: 'startDate', operator: '<=', value: now },
-          ],
-        },
-      );
+  async getActivePartnerships(): Promise<BrandPartnership[]> {
+    const { data, error } = await this.supabase
+      .from('brand_partnerships')
+      .select('*')
+      .eq('status', 'active')
+      .order('brand_name', { ascending: true });
 
-    // Filter out expired partnerships
-    partnerships = partnerships.filter((p) => {
-      if (p.endDate && p.endDate.toMillis() < now.toMillis()) {
-        return false;
-      }
-      return true;
-    });
-
-    // Filter by category if provided
-    if (categoryIds && categoryIds.length > 0) {
-      partnerships = partnerships.filter((p) => {
-        if (!p.categoryIds || p.categoryIds.length === 0) {
-          return true; // Show partnerships without category restrictions
-        }
-        return p.categoryIds.some((catId) => categoryIds.includes(catId));
-      });
+    if (error) {
+      throw new Error(`Failed to get active partnerships: ${error.message}`);
     }
 
-    // Sort by priority (higher first), then by partnership type
-    return partnerships.sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return b.priority - a.priority;
-      }
-      const typeOrder = { featured: 0, sponsor: 1, recommended: 2 };
-      return typeOrder[a.partnershipType] - typeOrder[b.partnershipType];
-    });
+    return (data || []).map(rowToBrandPartnership);
   }
 
   async getAllPartnerships(): Promise<BrandPartnership[]> {
-    const partnerships =
-      await this.firebaseService.getCollection<BrandPartnership>(
-        'brandPartnerships',
-        {
-          orderBy: { field: 'priority', direction: 'desc' },
-        },
-      );
-    // Secondary sort by brandName (Firestore only supports one orderBy, so we do it in memory)
-    return partnerships.sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return b.priority - a.priority;
-      }
-      return a.brandName.localeCompare(b.brandName);
-    });
+    const { data, error } = await this.supabase
+      .from('brand_partnerships')
+      .select('*')
+      .order('brand_name', { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to get partnerships: ${error.message}`);
+    }
+
+    return (data || []).map(rowToBrandPartnership);
   }
 
   async getPartnership(
     partnershipId: string,
   ): Promise<BrandPartnership | null> {
-    return this.firebaseService.getDocument<BrandPartnership>(
-      'brandPartnerships',
-      partnershipId,
-    );
+    const { data, error } = await this.supabase
+      .from('brand_partnerships')
+      .select('*')
+      .eq('id', partnershipId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return rowToBrandPartnership(data);
   }
 
   async createPartnership(
     partnershipData: Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<BrandPartnership> {
-    return this.firebaseService.addDocument<BrandPartnership>(
-      'brandPartnerships',
-      {
-        ...partnershipData,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('brand_partnerships')
+      .insert({
+        brand_name: partnershipData.brandName,
+        contact_email: partnershipData.contactEmail,
+        contact_name: partnershipData.contactName,
+        partnership_type: partnershipData.partnershipType,
+        status: partnershipData.status,
+        notes: partnershipData.notes,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create partnership: ${error.message}`);
+    }
+
+    return rowToBrandPartnership(data);
   }
 
   async updatePartnership(
     partnershipId: string,
     updates: Partial<Omit<BrandPartnership, 'id' | 'createdAt' | 'updatedAt'>>,
   ): Promise<BrandPartnership> {
-    return this.firebaseService.updateDocument<BrandPartnership>(
-      'brandPartnerships',
-      partnershipId,
-      {
-        ...updates,
-        updatedAt: Timestamp.now(),
-      },
-    );
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.brandName !== undefined) updateData.brand_name = updates.brandName;
+    if (updates.contactEmail !== undefined) updateData.contact_email = updates.contactEmail;
+    if (updates.contactName !== undefined) updateData.contact_name = updates.contactName;
+    if (updates.partnershipType !== undefined) updateData.partnership_type = updates.partnershipType;
+    if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.notes !== undefined) updateData.notes = updates.notes;
+
+    const { data, error } = await this.supabase
+      .from('brand_partnerships')
+      .update(updateData)
+      .eq('id', partnershipId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update partnership: ${error.message}`);
+    }
+
+    return rowToBrandPartnership(data);
   }
 
   async deletePartnership(partnershipId: string): Promise<void> {
-    await this.firebaseService.deleteDocument(
-      'brandPartnerships',
-      partnershipId,
-    );
+    const { error } = await this.supabase
+      .from('brand_partnerships')
+      .delete()
+      .eq('id', partnershipId);
+
+    if (error) {
+      throw new Error(`Failed to delete partnership: ${error.message}`);
+    }
   }
 }

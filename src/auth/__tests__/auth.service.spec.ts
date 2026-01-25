@@ -17,7 +17,6 @@ describe('AuthService', () => {
   it('delegates createOrUpdateUser to UsersService', async () => {
     const resultUser = {
       id: 'uid',
-      firebaseUid: 'uid',
       email: 'test@example.com',
       subscriptionTier: 'free',
       subscriptionStatus: 'active',

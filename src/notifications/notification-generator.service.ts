@@ -1,13 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { NotificationsService } from './notifications.service';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { SUPABASE } from '../config/supabase.provider';
 
 @Injectable()
 export class NotificationGeneratorService {
   constructor(
     private readonly notificationsService: NotificationsService,
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
   ) {}
 
   async generateExpirationNotifications(
@@ -15,26 +16,25 @@ export class NotificationGeneratorService {
     thresholdDays: number[],
   ) {
     for (const days of thresholdDays) {
-      const thresholdDate = Timestamp.fromDate(
-        new Date(Date.now() + days * 24 * 60 * 60 * 1000),
-      );
-      const now = Timestamp.now();
+      const thresholdDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const now = new Date();
 
-      const items = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'inventoryItems',
-        {
-          where: [
-            { field: 'status', operator: '==', value: 'active' },
-            { field: 'expirationDate', operator: '>=', value: now },
-            { field: 'expirationDate', operator: '<=', value: thresholdDate },
-          ],
-        },
-      );
+      const { data: items, error } = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .gte('expiration_date', now.toISOString())
+        .lte('expiration_date', thresholdDate.toISOString());
 
-      for (const item of items) {
-        const expirationDate = item.expirationDate.toDate();
+      if (error) {
+        continue; // Log but continue with other thresholds
+      }
+
+      for (const item of items || []) {
+        if (!item.expiration_date) continue;
+
+        const expirationDate = new Date(item.expiration_date);
         const daysUntil = Math.ceil(
           (expirationDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
         );
@@ -42,41 +42,40 @@ export class NotificationGeneratorService {
         await this.notificationsService.createNotification(userId, {
           type: 'expiration',
           title: 'Item Expiring Soon',
-          message: `${item.supplyName} expires in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
+          message: `${item.supply_name} expires in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
           data: {
             inventoryItemId: item.id,
-            expirationDate: item.expirationDate,
+            expirationDate: item.expiration_date,
           },
           isRead: false,
-          sentAt: Timestamp.now(),
+          sentAt: new Date(),
         });
       }
     }
   }
 
   async generateLowStockNotifications(userId: string, threshold: number = 5) {
-    const items = await this.firebaseService.getSubcollection(
-      'users',
-      userId,
-      'inventoryItems',
-      {
-        where: [
-          { field: 'status', operator: '==', value: 'active' },
-          { field: 'quantity', operator: '<=', value: threshold },
-        ],
-      },
-    );
+    const { data: items, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .lte('quantity', threshold);
 
-    for (const item of items) {
+    if (error) {
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
+
+    for (const item of items || []) {
       await this.notificationsService.createNotification(userId, {
         type: 'low_stock',
         title: 'Low Stock Alert',
-        message: `${item.supplyName} is running low (${item.quantity} remaining)`,
+        message: `${item.supply_name} is running low (${item.quantity} remaining)`,
         data: {
           inventoryItemId: item.id,
         },
         isRead: false,
-        sentAt: Timestamp.now(),
+        sentAt: new Date(),
       });
     }
   }

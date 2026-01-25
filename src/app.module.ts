@@ -5,7 +5,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from './config/config.module';
-import { FirebaseModule } from './config/firebase.module';
+import { SupabaseModule } from './config/supabase.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { LocationsModule } from './locations/locations.module';
@@ -59,7 +59,7 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
       },
     ]),
     ConfigModule,
-    FirebaseModule,
+    SupabaseModule,
     AuthModule,
     UsersModule,
     LocationsModule,

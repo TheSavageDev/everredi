@@ -4,9 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 
 export interface OshaComplianceRule {
@@ -24,8 +24,8 @@ export interface OshaComplianceRule {
   groupSizeMax?: number;
   environment?: string;
   isActive: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ComplianceCheck {
@@ -47,14 +47,47 @@ export interface ComplianceCheck {
     supplyName: string;
     quantity: number;
   }>;
-  checkedAt: Timestamp;
+  checkedAt: Date;
   notes?: string;
+}
+
+// Helper functions to convert PostgreSQL rows
+function rowToOshaRule(row: any): OshaComplianceRule {
+  return {
+    id: row.id,
+    industry: row.industry,
+    ruleName: row.rule_name,
+    description: row.description,
+    requiredSupplies: row.required_supplies || [],
+    groupSizeMin: row.group_size_min,
+    groupSizeMax: row.group_size_max,
+    environment: row.environment,
+    isActive: row.is_active,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToComplianceCheck(row: any): ComplianceCheck {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    userKitId: row.kit_id,
+    oshaRuleId: row.osha_rule_id,
+    oshaRuleName: row.osha_rule_name,
+    complianceStatus: row.compliance_status,
+    complianceScore: row.compliance_score,
+    missingItems: row.missing_items || [],
+    extraItems: row.extra_items || [],
+    checkedAt: new Date(row.checked_at),
+    notes: row.notes,
+  };
 }
 
 @Injectable()
 export class ComplianceService {
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
   ) {}
 
@@ -68,15 +101,17 @@ export class ComplianceService {
 
     if (!isPremium) {
       // Count existing compliance checks for this kit
-      const checksSnapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('userKits')
-        .doc(userKitId)
-        .collection('complianceChecks')
-        .get();
+      const { count, error: countError } = await this.supabase
+        .from('compliance_checks')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('kit_id', userKitId);
 
-      const existingChecks = checksSnapshot.size;
+      if (countError) {
+        // Log but continue
+      }
+
+      const existingChecks = count || 0;
       const maxFreeChecksPerKit = 1;
 
       if (existingChecks >= maxFreeChecksPerKit) {
@@ -88,50 +123,49 @@ export class ComplianceService {
       }
     }
 
-    // Get kit items
-    const kitItemsSnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .doc(userKitId)
-      .collection('kitItems')
-      .get();
+    // Get kit items (requirements and actual items)
+    const { data: kitItems, error: itemsError } = await this.supabase
+      .from('inventory_items')
+      .select(`
+        supply_id,
+        freeform_name,
+        is_requirement,
+        quantity,
+        inventory_lots(
+          quantity_units,
+          status,
+          expiration_date
+        )
+      `)
+      .eq('kit_id', userKitId);
 
-    const kitItems = kitItemsSnapshot.docs.map(
-      (doc) =>
-        doc.data() as unknown as {
-          supplyId: string;
-          actualQuantity: number;
-        },
-    );
+    if (itemsError) {
+      throw new Error(`Failed to get kit items: ${itemsError.message}`);
+    }
 
     // Get compliance rule
     let rule: OshaComplianceRule | null = null;
     if (oshaRuleId) {
-      const ruleDoc = await this.firestore
-        .collection('oshaComplianceRules')
-        .doc(oshaRuleId)
-        .get();
-      if (ruleDoc.exists) {
-        rule = {
-          id: ruleDoc.id,
-          ...(ruleDoc.data() as unknown as Omit<OshaComplianceRule, 'id'>),
-        } as OshaComplianceRule;
+      const { data, error } = await this.supabase
+        .from('osha_compliance_rules')
+        .select('*')
+        .eq('id', oshaRuleId)
+        .single();
+
+      if (!error && data) {
+        rule = rowToOshaRule(data);
       }
     } else if (industry) {
-      const rulesSnapshot = await this.firestore
-        .collection('oshaComplianceRules')
-        .where('industry', '==', industry)
-        .where('isActive', '==', true)
+      const { data, error } = await this.supabase
+        .from('osha_compliance_rules')
+        .select('*')
+        .eq('industry', industry)
+        .eq('is_active', true)
         .limit(1)
-        .get();
+        .single();
 
-      if (!rulesSnapshot.empty) {
-        const ruleDoc = rulesSnapshot.docs[0];
-        rule = {
-          id: ruleDoc.id,
-          ...(ruleDoc.data() as unknown as Omit<OshaComplianceRule, 'id'>),
-        } as OshaComplianceRule;
+      if (!error && data) {
+        rule = rowToOshaRule(data);
       }
     }
 
@@ -144,10 +178,23 @@ export class ComplianceService {
     const extraItems: ComplianceCheck['extraItems'] = [];
 
     for (const required of rule.requiredSupplies) {
-      const kitItem = kitItems.find(
-        (item) => item.supplyId === required.supplyId,
+      const kitItem = (kitItems || []).find(
+        (item: any) => item.supply_id === required.supplyId,
       );
-      const actualQuantity = kitItem?.actualQuantity || 0;
+      
+      // Calculate actual quantity from inventory_lots
+      let actualQuantity = 0;
+      if (kitItem?.inventory_lots && Array.isArray(kitItem.inventory_lots)) {
+        actualQuantity = kitItem.inventory_lots
+          .filter((lot: any) => 
+            lot.status === 'active' && 
+            (!lot.expiration_date || new Date(lot.expiration_date) >= new Date())
+          )
+          .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
+      } else if (kitItem && !kitItem.is_requirement) {
+        // For actual items without lots, use quantity field
+        actualQuantity = kitItem.quantity || 0;
+      }
 
       if (actualQuantity < required.quantity) {
         missingItems.push({
@@ -164,8 +211,22 @@ export class ComplianceService {
       (sum, req) => sum + req.quantity,
       0,
     );
-    const totalActual = kitItems.reduce(
-      (sum, item) => sum + item.actualQuantity,
+    const totalActual = (kitItems || []).reduce(
+      (sum: number, item: any) => {
+        // Calculate actual quantity from lots
+        let actualQty = 0;
+        if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
+          actualQty = item.inventory_lots
+            .filter((lot: any) => 
+              lot.status === 'active' && 
+              (!lot.expiration_date || new Date(lot.expiration_date) >= new Date())
+            )
+            .reduce((lotSum: number, lot: any) => lotSum + (lot.quantity_units || 0), 0);
+        } else if (!item.is_requirement) {
+          actualQty = item.quantity || 0;
+        }
+        return sum + actualQty;
+      },
       0,
     );
     const complianceScore = Math.round((totalActual / totalRequired) * 100);
@@ -179,86 +240,60 @@ export class ComplianceService {
     }
 
     // Save compliance check
-    const now = Timestamp.now();
-    const checkRef = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .doc(userKitId)
-      .collection('complianceChecks')
-      .add({
-        userId,
-        userKitId,
-        oshaRuleId: rule.id,
-        oshaRuleName: rule.ruleName,
-        complianceStatus,
-        complianceScore,
-        missingItems,
-        extraItems,
-        checkedAt: now,
-      });
+    const now = new Date();
+    const { data, error } = await this.supabase
+      .from('compliance_checks')
+      .insert({
+        user_id: userId,
+        kit_id: userKitId,
+        osha_rule_id: rule.id,
+        osha_rule_name: rule.ruleName,
+        compliance_status: complianceStatus,
+        compliance_score: complianceScore,
+        missing_items: missingItems,
+        extra_items: extraItems,
+        checked_at: now.toISOString(),
+        created_at: now.toISOString(),
+      })
+      .select()
+      .single();
 
-    const checkDoc = await checkRef.get();
-    return {
-      id: checkDoc.id,
-      ...(checkDoc.data() as unknown as Omit<ComplianceCheck, 'id'>),
-    } as ComplianceCheck;
+    if (error) {
+      throw new Error(`Failed to save compliance check: ${error.message}`);
+    }
+
+    return rowToComplianceCheck(data);
   }
 
   async getComplianceChecks(userId: string): Promise<ComplianceCheck[]> {
-    const checks: ComplianceCheck[] = [];
+    const { data, error } = await this.supabase
+      .from('compliance_checks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('checked_at', { ascending: false });
 
-    // Get all user kits
-    const kitsSnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .get();
-
-    for (const kitDoc of kitsSnapshot.docs) {
-      const checksSnapshot = await kitDoc.ref
-        .collection('complianceChecks')
-        .orderBy('checkedAt', 'desc')
-        .get();
-
-      checks.push(
-        ...(checksSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as unknown as Omit<ComplianceCheck, 'id'>),
-        })) as ComplianceCheck[]),
-      );
+    if (error) {
+      throw new Error(`Failed to get compliance checks: ${error.message}`);
     }
 
-    return checks.sort(
-      (a, b) => b.checkedAt.toMillis() - a.checkedAt.toMillis(),
-    );
+    return (data || []).map(rowToComplianceCheck);
   }
 
   async getComplianceCheck(
     userId: string,
     checkId: string,
   ): Promise<ComplianceCheck | null> {
-    // Search across all kits
-    const kitsSnapshot = await this.firestore
-      .collection('users')
-      .doc(userId)
-      .collection('userKits')
-      .get();
+    const { data, error } = await this.supabase
+      .from('compliance_checks')
+      .select('*')
+      .eq('id', checkId)
+      .eq('user_id', userId)
+      .single();
 
-    for (const kitDoc of kitsSnapshot.docs) {
-      const checkDoc = await kitDoc.ref
-        .collection('complianceChecks')
-        .doc(checkId)
-        .get();
-
-      if (checkDoc.exists) {
-        return {
-          id: checkDoc.id,
-          ...(checkDoc.data() as unknown as Omit<ComplianceCheck, 'id'>),
-        } as ComplianceCheck;
-      }
+    if (error || !data) {
+      return null;
     }
 
-    return null;
+    return rowToComplianceCheck(data);
   }
 }

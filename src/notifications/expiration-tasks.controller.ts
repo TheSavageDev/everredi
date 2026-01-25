@@ -5,15 +5,14 @@ import {
   Logger,
   HttpCode,
   HttpStatus,
+  Inject,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 import { NotificationsService } from './notifications.service';
 import { PushNotificationService } from './push-notification.service';
 import type { ExpirationTaskPayload } from './cloud-tasks.service';
-import { Timestamp } from 'firebase-admin/firestore';
-import { Inject } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import { FIRESTORE } from '../config/firebase.provider';
 
 const logger = new Logger('ExpirationTasksController');
 
@@ -22,7 +21,7 @@ export class ExpirationTasksController {
   constructor(
     private readonly notificationsService: NotificationsService,
     private readonly pushNotificationService: PushNotificationService,
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
   ) {}
 
   /**
@@ -41,14 +40,14 @@ export class ExpirationTasksController {
       // Verify the item still exists and expiration date is still relevant
       let item;
       try {
-        const itemDoc = await this.firestore
-          .collection('users')
-          .doc(payload.userId)
-          .collection('inventoryItems')
-          .doc(payload.itemId)
-          .get();
+        const { data: itemData, error: itemError } = await this.supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('id', payload.itemId)
+          .eq('user_id', payload.userId)
+          .single();
 
-        if (!itemDoc.exists) {
+        if (itemError || !itemData) {
           logger.warn(
             `Item ${payload.itemId} not found, skipping notification`,
           );
@@ -58,7 +57,7 @@ export class ExpirationTasksController {
           };
         }
 
-        item = { id: itemDoc.id, ...itemDoc.data() } as any;
+        item = itemData;
       } catch (error) {
         logger.warn(`Error fetching item ${payload.itemId}:`, error);
         return {
@@ -68,8 +67,8 @@ export class ExpirationTasksController {
       }
 
       // Check if expiration date has changed
-      if (item.expirationDate) {
-        const itemExpirationDate = item.expirationDate.toDate();
+      if (item.expiration_date) {
+        const itemExpirationDate = new Date(item.expiration_date);
         const expectedExpirationDate = new Date(payload.expirationDate);
 
         // If expiration date changed significantly (more than 1 day difference), skip notification
@@ -138,19 +137,19 @@ export class ExpirationTasksController {
       await this.notificationsService.createNotification(payload.userId, {
         type: 'expiration',
         title: 'Item Expiring Soon',
-        message: `${item.supplyName} expires in ${daysText}`,
+        message: `${item.supply_name} expires in ${daysText}`,
         data: {
           itemId: payload.itemId,
           daysUntilExpiration: payload.daysUntilExpiration,
         },
         isRead: false,
-        sentAt: Timestamp.now(),
+        sentAt: new Date(),
       });
 
       // Send push notification
       await this.pushNotificationService.sendExpirationNotification(
         payload.userId,
-        item.supplyName,
+        item.supply_name,
         payload.daysUntilExpiration,
         payload.itemId,
       );

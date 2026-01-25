@@ -1,5 +1,9 @@
 # RevenueCat Firebase Extension Setup Guide
 
+> **⚠️ DEPRECATED/HISTORICAL**  
+> This document is for historical reference only. The system has migrated from Firebase to Supabase.  
+> RevenueCat integration should now sync directly to Supabase PostgreSQL via webhooks or API.
+
 This guide will help you set up the RevenueCat Firebase Extension to automatically sync subscription statuses from RevenueCat to Firestore.
 
 ## Prerequisites
@@ -161,4 +165,6 @@ After the extension is set up, the backend will automatically:
 - Handle subscription changes in real-time
 
 No additional code changes are needed - the extension handles all the syncing automatically!
+
+
 

@@ -1,15 +1,14 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
-import { FIRESTORE } from '../config/firebase.provider';
-import type { firestore } from 'firebase-admin';
 
 export interface UsagePattern {
   supplyId: string;
   supplyName: string;
   usageCount: number;
-  lastUsed?: Timestamp;
+  lastUsed?: Date;
   averageUsagePerMonth: number;
   trend: 'increasing' | 'decreasing' | 'stable';
 }
@@ -17,7 +16,7 @@ export interface UsagePattern {
 export interface ExpirationForecast {
   itemId: string;
   supplyName: string;
-  expirationDate: Timestamp;
+  expirationDate: Date;
   daysUntilExpiration: number;
   estimatedValue: number;
   category?: string;
@@ -42,33 +41,28 @@ export interface ComplianceTrend {
   kitId: string;
   kitName: string;
   complianceScore: number;
-  checkDate: Timestamp;
+  checkDate: Date;
   missingItems: number;
 }
 
 @Injectable()
 export class AnalyticsService {
   constructor(
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
   ) {}
 
   async getUsagePatterns(userId: string): Promise<UsagePattern[]> {
-    // Get all inventory items
-    interface InventoryItem {
-      id: string;
-      status?: string;
-      supplyId?: string;
-      supplyName?: string;
-      updatedAt?: Timestamp;
-    }
+    // Get all inventory items with status 'used'
+    const { data: items, error } = await this.supabase
+      .from('inventory_items')
+      .select('id, supply_id, supply_name, updated_at')
+      .eq('user_id', userId)
+      .eq('status', 'used');
 
-    const items = await this.firebaseService.getSubcollection<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-    );
+    if (error) {
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
 
     // Group by supply and calculate usage
     const supplyUsage = new Map<
@@ -77,61 +71,61 @@ export class AnalyticsService {
         supplyId: string;
         supplyName: string;
         usageCount: number;
-        lastUsed?: Timestamp;
-        dates: Timestamp[];
+        lastUsed?: Date;
+        dates: Date[];
       }
     >();
 
-    items.forEach((item) => {
-      if (item.status === 'used' && item.supplyId) {
+    (items || []).forEach((item: any) => {
+      if (item.supply_id) {
         const defaultUsage = {
-          supplyId: item.supplyId,
-          supplyName: item.supplyName || 'Unknown',
+          supplyId: item.supply_id,
+          supplyName: item.supply_name || 'Unknown',
           usageCount: 0,
-          lastUsed: undefined as Timestamp | undefined,
-          dates: [] as Timestamp[],
+          lastUsed: undefined as Date | undefined,
+          dates: [] as Date[],
         };
-        const existing = supplyUsage.get(item.supplyId) || defaultUsage;
+        const existing = supplyUsage.get(item.supply_id) || defaultUsage;
 
         existing.usageCount++;
+        const updatedAt = item.updated_at
+          ? new Date(item.updated_at)
+          : undefined;
         if (
-          item.updatedAt &&
-          (!existing.lastUsed || item.updatedAt > existing.lastUsed)
+          updatedAt &&
+          (!existing.lastUsed ||
+            updatedAt.getTime() > existing.lastUsed.getTime())
         ) {
-          existing.lastUsed = item.updatedAt;
+          existing.lastUsed = updatedAt;
         }
-        if (item.updatedAt) {
-          existing.dates.push(item.updatedAt);
+        if (updatedAt) {
+          existing.dates.push(updatedAt);
         }
 
-        supplyUsage.set(item.supplyId, existing);
+        supplyUsage.set(item.supply_id, existing);
       }
     });
 
     // Calculate trends and averages
-    const now = Timestamp.now();
-    const sixMonthsAgo = Timestamp.fromMillis(
-      now.toMillis() - 180 * 24 * 60 * 60 * 1000,
-    );
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
 
     const patterns: UsagePattern[] = [];
 
     for (const [, data] of supplyUsage.entries()) {
-      const recentDates = data.dates.filter((date) => date >= sixMonthsAgo);
+      const recentDates = data.dates.filter(
+        (date) => date.getTime() >= sixMonthsAgo.getTime(),
+      );
       const averageUsagePerMonth = recentDates.length / 6;
 
       // Simple trend calculation: compare first half vs second half of last 6 months
       const firstHalf = recentDates.filter(
         (date) =>
-          date >=
-            Timestamp.fromMillis(now.toMillis() - 90 * 24 * 60 * 60 * 1000) &&
-          date <
-            Timestamp.fromMillis(now.toMillis() - 45 * 24 * 60 * 60 * 1000),
+          date.getTime() >= now.getTime() - 90 * 24 * 60 * 60 * 1000 &&
+          date.getTime() < now.getTime() - 45 * 24 * 60 * 60 * 1000,
       ).length;
       const secondHalf = recentDates.filter(
-        (date) =>
-          date >=
-          Timestamp.fromMillis(now.toMillis() - 45 * 24 * 60 * 60 * 1000),
+        (date) => date.getTime() >= now.getTime() - 45 * 24 * 60 * 60 * 1000,
       ).length;
 
       let trend: 'increasing' | 'decreasing' | 'stable' = 'stable';
@@ -159,48 +153,56 @@ export class AnalyticsService {
     userId: string,
     daysAhead: number = 90,
   ): Promise<ExpirationForecast[]> {
-    const now = Timestamp.now();
-    const futureDate = Timestamp.fromMillis(
-      now.toMillis() + daysAhead * 24 * 60 * 60 * 1000,
+    const now = new Date();
+    const futureDate = new Date(
+      now.getTime() + daysAhead * 24 * 60 * 60 * 1000,
     );
 
-    interface InventoryItem {
-      id: string;
-      expirationDate?: Timestamp;
-      purchasePrice?: number;
-      quantity?: number;
-      supplyName?: string;
-      categoryName?: string;
-    }
+    const { data: items, error } = await this.supabase
+      .from('inventory_items')
+      .select(
+        'id, expiration_date, purchase_price, quantity, supply_name, supply_category_id',
+      )
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .not('expiration_date', 'is', null)
+      .lte('expiration_date', futureDate.toISOString());
 
-    const inventorySnapshot =
-      await this.firebaseService.getSubcollection<InventoryItem>(
-        'users',
-        userId,
-        'inventoryItems',
-        {
-          where: [{ field: 'status', operator: '==', value: 'active' }],
-        },
-      );
+    if (error) {
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
 
     const forecasts: ExpirationForecast[] = [];
 
-    for (const item of inventorySnapshot) {
-      if (item.expirationDate && item.expirationDate <= futureDate) {
-        const expirationDate = item.expirationDate;
+    for (const item of items || []) {
+      if (item.expiration_date) {
+        const expirationDate = new Date(item.expiration_date);
         const daysUntilExpiration = Math.ceil(
-          (expirationDate.toMillis() - now.toMillis()) / (24 * 60 * 60 * 1000),
+          (new Date(item.expiration_date).getTime() - now.getTime()) /
+            (24 * 60 * 60 * 1000),
         );
 
-        const estimatedValue = (item.purchasePrice || 0) * (item.quantity || 1);
+        const estimatedValue =
+          (parseFloat(item.purchase_price) || 0) * (item.quantity || 1);
+
+        // Get category name if needed
+        let categoryName: string | undefined;
+        if (item.supply_category_id) {
+          const { data: category } = await this.supabase
+            .from('supply_categories')
+            .select('name')
+            .eq('id', item.supply_category_id)
+            .single();
+          categoryName = category?.name;
+        }
 
         forecasts.push({
           itemId: item.id,
-          supplyName: item.supplyName || 'Unknown',
+          supplyName: item.supply_name || 'Unknown',
           expirationDate,
           daysUntilExpiration,
           estimatedValue,
-          category: item.categoryName,
+          category: categoryName,
         });
       }
     }
@@ -212,23 +214,15 @@ export class AnalyticsService {
   }
 
   async getCostTracking(userId: string): Promise<CostTracking> {
-    interface InventoryItem {
-      id: string;
-      purchasePrice?: number;
-      quantity?: number;
-      categoryId?: string;
-      categoryName?: string;
-      purchaseDate?: Timestamp;
-    }
+    const { data: items, error } = await this.supabase
+      .from('inventory_items')
+      .select('id, purchase_price, quantity, supply_category_id, purchase_date')
+      .eq('user_id', userId)
+      .eq('status', 'active');
 
-    const items = await this.firebaseService.getSubcollection<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-      {
-        where: [{ field: 'status', operator: '==', value: 'active' }],
-      },
-    );
+    if (error) {
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
 
     // Calculate total inventory value
     let totalInventoryValue = 0;
@@ -242,12 +236,32 @@ export class AnalyticsService {
       }
     >();
 
-    items.forEach((item) => {
-      const itemValue = (item.purchasePrice || 0) * (item.quantity || 1);
+    // Get category names
+    const categoryIds = new Set(
+      (items || [])
+        .map((item: any) => item.supply_category_id)
+        .filter((id: string) => id),
+    );
+
+    const categoryMap = new Map<string, string>();
+    if (categoryIds.size > 0) {
+      const { data: categories } = await this.supabase
+        .from('supply_categories')
+        .select('id, name')
+        .in('id', Array.from(categoryIds));
+
+      (categories || []).forEach((cat: any) => {
+        categoryMap.set(cat.id, cat.name);
+      });
+    }
+
+    (items || []).forEach((item: any) => {
+      const itemValue =
+        (parseFloat(item.purchase_price) || 0) * (item.quantity || 1);
       totalInventoryValue += itemValue;
 
-      const categoryId = item.categoryId || 'uncategorized';
-      const categoryName = item.categoryName || 'Uncategorized';
+      const categoryId = item.supply_category_id || 'uncategorized';
+      const categoryName = categoryMap.get(categoryId) || 'Uncategorized';
 
       const existing = categoryCosts.get(categoryId) || {
         categoryId,
@@ -266,15 +280,15 @@ export class AnalyticsService {
     const now = new Date();
     const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
 
-    items.forEach((item) => {
-      if (item.purchaseDate && item.purchasePrice) {
-        const purchaseDate = item.purchaseDate.toDate();
+    (items || []).forEach((item: any) => {
+      if (item.purchase_date && item.purchase_price) {
+        const purchaseDate = new Date(item.purchase_date);
         if (purchaseDate >= oneYearAgo) {
           const monthKey = `${purchaseDate.getFullYear()}-${String(purchaseDate.getMonth() + 1).padStart(2, '0')}`;
           const existing = monthlySpending.get(monthKey) || 0;
           monthlySpending.set(
             monthKey,
-            existing + item.purchasePrice * (item.quantity || 1),
+            existing + parseFloat(item.purchase_price) * (item.quantity || 1),
           );
         }
       }
@@ -303,54 +317,42 @@ export class AnalyticsService {
     userId: string,
     limit: number = 10,
   ): Promise<ComplianceTrend[]> {
-    interface UserKit {
-      id: string;
-      name?: string;
+    // Get latest compliance check for each kit
+    const { data: checks, error } = await this.supabase
+      .from('compliance_checks')
+      .select(
+        'kit_id, compliance_score, checked_at, missing_items, kits(name)',
+      )
+      .eq('user_id', userId)
+      .order('checked_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to get compliance checks: ${error.message}`);
     }
 
-    interface ComplianceCheck {
-      complianceScore?: number;
-      createdAt?: Timestamp;
-      missingItems?: Array<unknown>;
-    }
-
-    const kits = await this.firebaseService.getSubcollection<UserKit>(
-      'users',
-      userId,
-      'userKits',
-    );
-
-    const trends: ComplianceTrend[] = [];
-
-    for (const kit of kits) {
-      // Get latest compliance check for this kit
-      // Note: This is a nested subcollection (users/{userId}/userKits/{kitId}/complianceChecks)
-      // FirebaseService doesn't support nested subcollections yet, so we use direct Firestore access
-      const checksSnapshot = await this.firestore
-        .collection('users')
-        .doc(userId)
-        .collection('userKits')
-        .doc(kit.id)
-        .collection('complianceChecks')
-        .orderBy('createdAt', 'desc')
-        .limit(1)
-        .get();
-
-      if (!checksSnapshot.empty) {
-        const check = checksSnapshot.docs[0].data() as ComplianceCheck;
-        trends.push({
-          kitId: kit.id,
-          kitName: kit.name || 'Unnamed Kit',
-          complianceScore: check.complianceScore || 0,
-          checkDate: check.createdAt || Timestamp.now(),
-          missingItems: check.missingItems?.length || 0,
-        });
+    // Group by kit and get latest for each
+    const kitMap = new Map<string, any>();
+    (checks || []).forEach((check: any) => {
+      if (!kitMap.has(check.kit_id)) {
+        kitMap.set(check.kit_id, check);
       }
-    }
+    });
+
+    const trends: ComplianceTrend[] = Array.from(kitMap.values()).map(
+      (check: any) => ({
+        kitId: check.kit_id,
+        kitName: check.kits?.name || 'Unnamed Kit',
+        complianceScore: check.compliance_score || 0,
+        checkDate: new Date(check.checked_at),
+        missingItems: Array.isArray(check.missing_items)
+          ? check.missing_items.length
+          : 0,
+      }),
+    );
 
     // Sort by check date descending
     return trends
-      .sort((a, b) => b.checkDate.toMillis() - a.checkDate.toMillis())
+      .sort((a, b) => b.checkDate.getTime() - a.checkDate.getTime())
       .slice(0, limit);
   }
 }

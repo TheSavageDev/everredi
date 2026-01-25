@@ -9,12 +9,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { InventoryService, InventoryItem } from './inventory.service';
 
 @Controller('inventory')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 

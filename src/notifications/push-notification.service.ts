@@ -1,59 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
+import { DeviceTokensService } from './device-tokens.service';
 import * as admin from 'firebase-admin';
-import { DocumentData, Timestamp } from 'firebase-admin/firestore';
 
 const logger = new Logger('PushNotificationService');
 
-interface DeviceToken {
-  token: string;
-  platform: 'ios' | 'android' | 'web';
-  userId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 @Injectable()
 export class PushNotificationService {
-  constructor(private readonly firebaseService: FirebaseService) {}
-
-  /**
-   * Get all device tokens for a user
-   */
-  private async getUserDeviceTokens(userId: string): Promise<DeviceToken[]> {
-    try {
-      const tokens = await this.firebaseService.getSubcollection<{
-        token: string;
-        platform: string;
-        userId: string;
-        createdAt?: Timestamp;
-        updatedAt?: Timestamp;
-      }>('users', userId, 'deviceTokens');
-
-      return tokens.map((doc) => {
-        const data = doc as DocumentData;
-        const token: string = data.token as string;
-        const platform: string = data.platform as string;
-        const userId: string = data.userId as string;
-        const createdAt: Date =
-          (data.createdAt as Timestamp)?.toDate() || new Date();
-        const updatedAt: Date =
-          (data.updatedAt as Timestamp)?.toDate() || new Date();
-
-        return {
-          id: doc.id,
-          token,
-          platform: platform as 'ios' | 'android' | 'web',
-          userId,
-          createdAt,
-          updatedAt,
-        } as DeviceToken;
-      });
-    } catch (error) {
-      logger.error(`Error getting device tokens for user ${userId}:`, error);
-      return [];
-    }
-  }
+  constructor(
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
+    private readonly deviceTokensService: DeviceTokensService,
+  ) {}
 
   /**
    * Send expiration notification to user's devices
@@ -65,7 +23,8 @@ export class PushNotificationService {
     itemId: string,
   ): Promise<void> {
     try {
-      const deviceTokens = await this.getUserDeviceTokens(userId);
+      const deviceTokens =
+        await this.deviceTokensService.getUserDeviceTokens(userId);
 
       if (deviceTokens.length === 0) {
         logger.warn(`No device tokens found for user ${userId}`);
@@ -162,27 +121,7 @@ export class PushNotificationService {
     token: string,
   ): Promise<void> {
     try {
-      const tokens = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'deviceTokens',
-        {
-          where: [{ field: 'token', operator: '==', value: token }],
-        },
-      );
-
-      const batch = this.firebaseService.createBatch();
-      for (const tokenDoc of tokens) {
-        const ref = this.firebaseService.getSubcollectionDocumentRef(
-          'users',
-          userId,
-          'deviceTokens',
-          tokenDoc.id,
-        );
-        batch.delete(ref);
-      }
-
-      await batch.commit();
+      await this.deviceTokensService.removeDeviceToken(userId, token);
       logger.log(`Removed invalid token for user ${userId}`);
     } catch (error) {
       logger.error(`Error removing invalid token:`, error);

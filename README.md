@@ -1,18 +1,18 @@
 # Everredi API
 
-API for the Everredi emergency preparedness application, built with NestJS, Firebase, and Google Cloud Platform.
+API for the Everredi emergency preparedness application, built with NestJS, Supabase, and Google Cloud Platform.
 
 ## Overview
 
-The EverRedi api provides RESTful APIs for managing emergency preparedness kits, inventory items, locations, supplies, and user subscriptions. It integrates with Firebase Authentication, Firestore, Stripe, and Google Cloud services.
+The EverRedi API provides RESTful APIs for managing emergency preparedness kits, inventory items, locations, supplies, and user subscriptions. It integrates with Supabase (PostgreSQL + Auth), Stripe, and Google Cloud services.
 
 ## Prerequisites
 
 - **Node.js**: >= 24.0.0 (LTS)
 - **npm**: >= 11.0.0
 - **Google Cloud Project**: With billing enabled
-- **Firebase Project**: Configured with Firestore
-- **Service Account**: Firebase Admin SDK credentials (JSON key file)
+- **Supabase Project**: Configured with PostgreSQL database
+- **Supabase Service Role Key**: For admin operations
 
 ## Installation
 
@@ -32,11 +32,9 @@ cp env.example .env
 Update `.env` with your configuration:
 
 ```env
-# Firebase Configuration
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_PRIVATE_KEY=your-private-key
-FIREBASE_CLIENT_EMAIL=your-client-email
-FIREBASE_DATABASE_ID=(default)
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your-service-role-key
 
 # Server Configuration
 PORT=5051
@@ -54,11 +52,14 @@ GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL=gemini-1.0-pro
 ```
 
-### Firebase Service Account
+### Supabase Setup
 
-Place your Firebase service account JSON key file in the project root (e.g., `everredi-dev.json`). The file will be automatically loaded by the Firebase configuration module.
+1. Create a Supabase project at [supabase.com](https://supabase.com)
+2. Get your project URL and service role key from Project Settings → API
+3. Run the database migration: `api/migrations/000_consolidated_schema.sql`
+4. Configure OAuth providers in Supabase Dashboard → Authentication → Providers
 
-**Note**: Service account JSON files are excluded from git via `.gitignore` for security.
+**Note**: The service role key has admin privileges. Keep it secret and never expose it to the frontend.
 
 ## Development
 
@@ -118,9 +119,9 @@ src/
 ├── auth/                  # Authentication endpoints
 ├── common/                # Shared decorators and guards
 │   ├── decorators/        # Custom decorators (e.g., @CurrentUser)
-│   └── guards/            # Auth guards (Firebase)
+│   └── guards/            # Auth guards (Supabase)
 ├── config/                # Configuration modules
-│   ├── firebase.config.ts # Firebase Admin SDK setup
+│   ├── supabase.provider.ts # Supabase client setup
 │   └── ...
 ├── inventory/             # Inventory item management
 ├── kits/                  # Emergency kit templates and user kits
@@ -136,23 +137,26 @@ src/
 
 ### Authentication
 
-- Firebase Authentication integration
-- Protected routes with `@UseGuards(FirebaseAuthGuard)`
+- Supabase Authentication integration
+- Protected routes with `@UseGuards(SupabaseAuthGuard)`
 - Current user decorator `@CurrentUser()`
+- JWT token validation
 
 ### Inventory Management
 
 - CRUD operations for inventory items
-- Expiration date tracking
-- Automatic expiration notifications (60, 30, 10, 1 days before expiration)
+- Consolidated model: single `inventory_items` table handles both kit items and inventory
+- Expiration date tracking via `inventory_lots` table
+- Automatic expiration notifications (configurable warning days)
 - Purchase date tracking
 
 ### Emergency Kits
 
-- Pre-built kit templates
+- Pre-built kit templates with versioning
 - User-created custom kits
-- Kit item management
+- Kit items stored in `inventory_items` with `kit_id` set
 - Public template sharing
+- Template revisions for version control
 
 ### Notifications
 
@@ -160,21 +164,45 @@ src/
 - Expiration alerts via cron jobs
 - Device token management
 - In-app notification tracking
+- Notification preferences per tenant
 
 ### Subscriptions
 
 - Stripe integration
 - Subscription management
 - Webhook handling
+- RevenueCat sync support
 
 ### AI Integration
 
 - Google Gemini AI for intelligent features
 - Configurable model selection
+- AI-generated kit recommendations
+
+## Database
+
+The API uses Supabase PostgreSQL for data storage. Each environment uses a separate Supabase project:
+
+- **Dev**: Development Supabase project
+- **Staging**: Staging Supabase project
+- **Production**: Production Supabase project
+
+### Database Migrations
+
+See [migrations/README.md](./migrations/README.md) for migration documentation.
+
+For new installations, run the consolidated migration:
+```bash
+psql -h your-supabase-host -U postgres -d your-database -f migrations/000_consolidated_schema.sql
+```
+
+### Schema Documentation
+
+See [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) in the project root for complete schema documentation.
 
 ## Deployment
 
-The api is deployed to Google Cloud Run with automated CI/CD via Cloud Build.
+The API is deployed to Google Cloud Run with automated CI/CD via Cloud Build.
 
 ### Environments
 
@@ -189,19 +217,11 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions, inclu
 - Cloud Build setup
 - Service account configuration
 - Environment variable management
-- Firestore database configuration
+- Supabase project configuration
 
 ### Environment Management
 
 See [ENV_MANAGEMENT.md](./ENV_MANAGEMENT.md) for detailed information on managing environment-specific configurations.
-
-## Database
-
-The api uses Firestore (Firebase) for data storage. Each environment uses a separate Firestore database:
-
-- **Dev**: `(default)` database
-- **Staging**: `staging` database
-- **Production**: `prod` database
 
 ## Scheduled Jobs
 
@@ -221,11 +241,13 @@ Returns service status and environment information.
 
 ### Authentication
 
-All protected endpoints require a valid Firebase ID token in the `Authorization` header:
+All protected endpoints require a valid Supabase JWT token in the `Authorization` header:
 
 ```
-Authorization: Bearer <firebase-id-token>
+Authorization: Bearer <supabase-jwt-token>
 ```
+
+The token is validated using Supabase's JWT verification.
 
 ## Scripts
 
@@ -256,11 +278,12 @@ docker run -p 8080:8080 --env-file .env everredi-api
 
 ## Troubleshooting
 
-### Firebase Connection Issues
+### Supabase Connection Issues
 
-- Verify your service account JSON file is in the project root
-- Check that `FIREBASE_PROJECT_ID` matches your Firebase project
-- Ensure Firestore is enabled in your Firebase project
+- Verify `SUPABASE_URL` matches your Supabase project URL
+- Check that `SUPABASE_SECRET_KEY` is the service role key (not the anon key)
+- Ensure the database migration has been run
+- Check Supabase project status in the dashboard
 
 ### Port Already in Use
 

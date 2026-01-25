@@ -25,7 +25,10 @@
     "set-admin": "ts-node -r tsconfig-paths/register scripts/set-admin-user.ts",
     "test:system": "ts-node -r tsconfig-paths/register scripts/test-system.ts",
     "test:system:debug": "DEBUG=true ts-node -r tsconfig-paths/register scripts/test-system.ts",
-    "get-token": "ts-node -r tsconfig-paths/register scripts/get-token.ts"
+    "get-token": "ts-node -r tsconfig-paths/register scripts/get-token.ts",
+    "migrate": "ts-node -r tsconfig-paths/register scripts/run-migrations.ts",
+    "migrate:psql": "ts-node -r tsconfig-paths/register scripts/run-migrations-psql.ts",
+    "migrate:redesign": "ts-node -r tsconfig-paths/register scripts/run-migrations-batched.ts"
   },
   "dependencies": {
     "@google-cloud/tasks": "^5.5.2",
@@ -39,6 +42,7 @@
     "@sentry/nestjs": "^10.32.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "@supabase/supabase-js": "^2.47.10",
     "date-fns": "^4.1.0",
     "firebase-admin": "^13.6.0",
     "reflect-metadata": "^0.2.2",

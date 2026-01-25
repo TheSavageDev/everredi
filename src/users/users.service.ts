@@ -1,33 +1,67 @@
-import { Injectable, Inject, Logger, Optional, forwardRef } from '@nestjs/common';
-import type { firestore } from 'firebase-admin';
-import type { auth } from 'firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FIRESTORE } from '../config/firebase.provider';
-import { FIREBASE_AUTH } from '../config/firebase.provider';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 import { RevenueCatService } from '../subscriptions/revenuecat.service';
 
 export interface User {
   id: string;
-  firebaseUid: string;
   email: string;
   displayName?: string;
   avatarUrl?: string;
   stripeCustomerId?: string;
   subscriptionTier: 'free' | 'premium';
   subscriptionStatus: 'active' | 'cancelled' | 'expired';
-  subscriptionExpiresAt?: Timestamp;
+  subscriptionExpiresAt?: Date;
   referralCode?: string; // Unique code for this user
   referredBy?: string; // userId of referrer
   referralRewards?: {
     freeMonthsEarned: number;
-    lastRewardDate?: Timestamp;
+    lastRewardDate?: Date;
   };
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  lastLoginAt?: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt?: Date;
   isActive: boolean;
   isAdmin?: boolean; // Admin access flag
   onboardingCompleted?: boolean; // Track if user completed onboarding
+}
+
+// Helper function to convert PostgreSQL row to User interface
+function rowToUser(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url,
+    stripeCustomerId: row.stripe_customer_id,
+    subscriptionTier: row.subscription_tier,
+    subscriptionStatus: row.subscription_status,
+    subscriptionExpiresAt: row.subscription_expires_at
+      ? new Date(row.subscription_expires_at)
+      : undefined,
+    referralCode: row.referral_code,
+    referredBy: row.referred_by,
+    referralRewards: row.referral_rewards
+      ? {
+          freeMonthsEarned: row.referral_rewards.freeMonthsEarned || 0,
+          lastRewardDate: row.referral_rewards.lastRewardDate
+            ? new Date(row.referral_rewards.lastRewardDate)
+            : undefined,
+        }
+      : undefined,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : undefined,
+    isActive: row.is_active,
+    isAdmin: row.is_admin,
+    onboardingCompleted: row.onboarding_completed,
+  };
 }
 
 @Injectable()
@@ -36,67 +70,78 @@ export class UsersService {
   private readonly ENTITLEMENT_ID = 'everredi_pro';
 
   constructor(
-    @Inject(FIRESTORE) private readonly firestore: firestore.Firestore,
-    @Inject(FIREBASE_AUTH) private readonly firebaseAuth: auth.Auth,
-    @Optional() @Inject(forwardRef(() => RevenueCatService))
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
+    @Optional()
+    @Inject(forwardRef(() => RevenueCatService))
     private readonly revenueCatService?: RevenueCatService,
   ) {}
 
   async createOrUpdateUser(
-    firebaseUid: string,
+    userId: string,
     email: string,
     displayName?: string,
   ): Promise<User> {
     try {
-      const userRef = this.firestore.collection('users').doc(firebaseUid);
-      const userDoc = await userRef.get();
+      // Check if user exists
+      const { data: existingUser, error: fetchError } = await this.supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-      const now = Timestamp.now();
-      const userData: Partial<User> = {
-        firebaseUid,
+      const now = new Date();
+      const userData: any = {
         email,
-        updatedAt: now,
-        lastLoginAt: now,
+        updated_at: now.toISOString(),
+        last_login_at: now.toISOString(),
       };
 
       // Only include displayName if it's defined (not undefined)
       if (displayName !== undefined) {
-        userData.displayName = displayName;
+        userData.display_name = displayName;
       }
 
-      if (!userDoc.exists) {
+      if (!existingUser || fetchError) {
         // Generate unique referral code
-        const referralCode = this.generateReferralCode(firebaseUid);
+        const referralCode = this.generateReferralCode(userId);
 
         // Create new user
-        await userRef.set({
-          ...userData,
-          id: firebaseUid,
-          subscriptionTier: 'free',
-          subscriptionStatus: 'active',
-          referralCode,
-          onboardingCompleted: false,
-          createdAt: now,
-          isActive: true,
-        });
+        const { data: newUser, error: insertError } = await this.supabase
+          .from('users')
+          .insert({
+            id: userId,
+            ...userData,
+            subscription_tier: 'free',
+            subscription_status: 'active',
+            referral_code: referralCode,
+            onboarding_completed: false,
+            created_at: now.toISOString(),
+            is_active: true,
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          throw new Error(
+            `Failed to create user: ${insertError.message || 'Unknown error'}`,
+          );
+        }
 
         // Create default location for new users
         try {
-          const locationsRef = this.firestore
-            .collection('users')
-            .doc(firebaseUid)
-            .collection('locations');
+          const { data: existingLocations } = await this.supabase
+            .from('locations')
+            .select('id')
+            .eq('user_id', userId);
 
-          // Check if user already has locations (shouldn't happen for new user, but safety check)
-          const existingLocations = await locationsRef.get();
-          if (existingLocations.empty) {
-            await locationsRef.add({
-              userId: firebaseUid,
+          if (!existingLocations || existingLocations.length === 0) {
+            await this.supabase.from('locations').insert({
+              user_id: userId,
               name: 'Home',
-              locationType: 'home',
-              isPrimary: true,
-              createdAt: now,
-              updatedAt: now,
+              location_type: 'home',
+              is_primary: true,
+              created_at: now.toISOString(),
+              updated_at: now.toISOString(),
             });
           }
         } catch (locationError: unknown) {
@@ -106,114 +151,187 @@ export class UsersService {
               ? locationError.message
               : String(locationError);
           this.logger.warn(
-            `Failed to create default location for user ${firebaseUid}: ${errorMessage}`,
+            `Failed to create default location for user ${userId}: ${errorMessage}`,
           );
         }
+
+        return rowToUser(newUser);
       } else {
         // Update existing user - filter out undefined values
         const updateData = Object.fromEntries(
           Object.entries(userData).filter(([, value]) => value !== undefined),
         );
-        await userRef.update(updateData);
-      }
 
-      const updatedDoc = await userRef.get();
-      return { id: updatedDoc.id, ...updatedDoc.data() } as User;
-    } catch (error: unknown) {
-      const firestoreError = error as {
-        code?: number | string;
-        message?: string;
-      };
-      if (firestoreError.code === 5 || firestoreError.code === 'NOT_FOUND') {
-        throw new Error(
-          'Firestore database not found. Please ensure:\n' +
-            '  1. Firestore is enabled in your Firebase Console\n' +
-            '  2. The database exists in your Firebase project\n' +
-            '  3. Your FIREBASE_PROJECT_ID matches your Firebase project\n' +
-            '  4. If using a named database, set FIREBASE_DATABASE_ID in your .env file',
-        );
+        const { data: updatedUser, error: updateError } = await this.supabase
+          .from('users')
+          .update(updateData)
+          .eq('id', userId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw new Error(
+            `Failed to update user: ${updateError.message || 'Unknown error'}`,
+          );
+        }
+
+        return rowToUser(updatedUser);
       }
-      throw new Error(
-        `Failed to create or update user: ${firestoreError.message || 'Unknown error'}`,
-      );
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to create or update user: ${errorMessage}`);
     }
   }
 
   async getUserById(userId: string): Promise<User | null> {
-    const userDoc = await this.firestore.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
+    const { data, error } = await this.supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error || !data) {
+      if (error?.code === 'PGRST116') {
+        // No rows returned
+        return null;
+      }
+      this.logger.error(`Error fetching user ${userId}: ${error?.message}`);
       return null;
     }
-    return { id: userDoc.id, ...userDoc.data() } as User;
+
+    return rowToUser(data);
   }
 
   async searchUserByEmail(
     email: string,
   ): Promise<{ uid: string; email: string; displayName?: string } | null> {
     try {
-      // Use Firebase Admin Auth to get user by email
-      const userRecord = await this.firebaseAuth.getUserByEmail(email);
+      // Search in Supabase users table by email
+      const { data: user, error } = await this.supabase
+        .from('users')
+        .select('id, email, display_name')
+        .eq('email', email)
+        .single();
 
-      // Also get the user document from Firestore to get displayName if available
-      const userDoc = await this.firestore
-        .collection('users')
-        .doc(userRecord.uid)
-        .get();
-      const userData = userDoc.exists ? (userDoc.data() as User) : null;
+      if (error || !user) {
+        return null;
+      }
 
       return {
-        uid: userRecord.uid,
-        email: userRecord.email || email,
-        displayName:
-          userData?.displayName || userRecord.displayName || undefined,
+        uid: user.id,
+        email: user.email,
+        displayName: user.display_name || undefined,
       };
     } catch (error: unknown) {
       // If user not found, return null
-      const errorObj = error as { code?: string };
-      if (errorObj.code === 'auth/user-not-found') {
-        return null;
-      }
-      // Re-throw other errors
-      throw error;
+      return null;
     }
   }
 
   async updateUser(userId: string, updates: Partial<User>): Promise<User> {
-    const userRef = this.firestore.collection('users').doc(userId);
-    // Filter out undefined values before updating
-    const updateData = Object.fromEntries(
-      Object.entries({
-        ...updates,
-        updatedAt: Timestamp.now(),
-      }).filter(([, value]) => value !== undefined),
+    // Convert User interface fields to database column names
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.displayName !== undefined) {
+      updateData.display_name = updates.displayName;
+    }
+    if (updates.avatarUrl !== undefined) {
+      updateData.avatar_url = updates.avatarUrl;
+    }
+    if (updates.stripeCustomerId !== undefined) {
+      updateData.stripe_customer_id = updates.stripeCustomerId;
+    }
+    if (updates.subscriptionTier !== undefined) {
+      updateData.subscription_tier = updates.subscriptionTier;
+    }
+    if (updates.subscriptionStatus !== undefined) {
+      updateData.subscription_status = updates.subscriptionStatus;
+    }
+    if (updates.subscriptionExpiresAt !== undefined) {
+      updateData.subscription_expires_at = updates.subscriptionExpiresAt
+        ? updates.subscriptionExpiresAt.toISOString()
+        : null;
+    }
+    if (updates.referralCode !== undefined) {
+      updateData.referral_code = updates.referralCode;
+    }
+    if (updates.referredBy !== undefined) {
+      updateData.referred_by = updates.referredBy;
+    }
+    if (updates.referralRewards !== undefined) {
+      updateData.referral_rewards = updates.referralRewards
+        ? {
+            freeMonthsEarned: updates.referralRewards.freeMonthsEarned,
+            lastRewardDate: updates.referralRewards.lastRewardDate
+              ? updates.referralRewards.lastRewardDate.toISOString()
+              : undefined,
+          }
+        : null;
+    }
+    if (updates.isActive !== undefined) {
+      updateData.is_active = updates.isActive;
+    }
+    if (updates.isAdmin !== undefined) {
+      updateData.is_admin = updates.isAdmin;
+    }
+    if (updates.onboardingCompleted !== undefined) {
+      updateData.onboarding_completed = updates.onboardingCompleted;
+    }
+    if (updates.lastLoginAt !== undefined) {
+      updateData.last_login_at = updates.lastLoginAt
+        ? updates.lastLoginAt.toISOString()
+        : null;
+    }
+
+    // Filter out undefined values
+    const filteredData = Object.fromEntries(
+      Object.entries(updateData).filter(([, value]) => value !== undefined),
     );
-    await userRef.update(updateData);
-    const updatedDoc = await userRef.get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as User;
+
+    const { data, error } = await this.supabase
+      .from('users')
+      .update(filteredData)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update user: ${error.message}`);
+    }
+
+    return rowToUser(data);
   }
 
   /**
-   * Get subscription status from RevenueCat Firestore collection (created by Firebase Extension)
-   * Falls back to user document if extension data not available
+   * Get subscription status from RevenueCat table (migrated from Firestore)
+   * Falls back to user document if RevenueCat data not available
    */
-  private async getRevenueCatSubscriptionFromFirestore(
-    userId: string,
-  ): Promise<{
+  private async getRevenueCatSubscriptionFromSupabase(userId: string): Promise<{
     isPremium: boolean;
     expiresAt?: Date;
   } | null> {
     try {
-      const rcDoc = await this.firestore
-        .collection('revenuecat_customers')
-        .doc(userId)
-        .get();
+      const { data: rcData, error } = await this.supabase
+        .from('revenuecat_customers')
+        .select('entitlements')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (!rcDoc.exists) {
+      if (error) {
+        // Only log as error if it's not a "no rows" error
+        if (error.code !== 'PGRST116') {
+          this.logger.error(
+            `[getRevenueCatSubscriptionFromSupabase] Error querying revenuecat_customers for ${userId}: ${error.message}`,
+          );
+        }
         return null;
       }
 
-      const rcData = rcDoc.data();
       if (!rcData) {
+        // No RevenueCat data is expected for many users, so don't log as warning
         return null;
       }
 
@@ -222,6 +340,9 @@ export class UsersService {
       const entitlement = entitlements[this.ENTITLEMENT_ID];
 
       if (!entitlement) {
+        this.logger.warn(
+          `[getRevenueCatSubscriptionFromSupabase] No entitlement '${this.ENTITLEMENT_ID}' found for user ${userId}`,
+        );
         return { isPremium: false };
       }
 
@@ -240,7 +361,7 @@ export class UsersService {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `Failed to read RevenueCat data from Firestore for user ${userId}: ${errorMessage}`,
+        `Failed to read RevenueCat data from Supabase for user ${userId}: ${errorMessage}`,
       );
       return null;
     }
@@ -252,9 +373,8 @@ export class UsersService {
       throw new Error('User not found');
     }
 
-    // First, try to get subscription status from RevenueCat Firestore collection
-    // (created by Firebase Extension - this is the source of truth)
-    const rcStatus = await this.getRevenueCatSubscriptionFromFirestore(userId);
+    // First, try to get subscription status from RevenueCat table
+    const rcStatus = await this.getRevenueCatSubscriptionFromSupabase(userId);
 
     if (rcStatus) {
       // Sync RevenueCat status to user document for backward compatibility
@@ -266,40 +386,36 @@ export class UsersService {
         await this.updateUser(userId, {
           subscriptionTier: rcStatus.isPremium ? 'premium' : 'free',
           subscriptionStatus: rcStatus.isPremium ? 'active' : 'expired',
-          subscriptionExpiresAt: rcStatus.expiresAt
-            ? Timestamp.fromDate(rcStatus.expiresAt)
-            : undefined,
+          subscriptionExpiresAt: rcStatus.expiresAt,
         });
-        this.logger.log(
-          `Synced RevenueCat subscription status to user document for ${userId}`,
-        );
       }
 
-      // Re-fetch user to get updated data
-      const updatedUser = await this.getUserById(userId);
-
-      return {
+      const result = {
         tier: rcStatus.isPremium ? 'premium' : 'free',
         status: rcStatus.isPremium ? 'active' : 'expired',
         expiresAt: rcStatus.expiresAt?.toISOString(),
         isPremium: rcStatus.isPremium,
       };
+      return result;
     }
 
-    // Fallback: Check user document (for Stripe subscriptions or if extension not set up)
+    // Fallback: Check user document (for Stripe subscriptions or if RevenueCat not set up)
     let isPremium =
       user.subscriptionTier === 'premium' &&
       user.subscriptionStatus === 'active';
 
-    // If database shows free and extension not available, check RevenueCat API as fallback
+    // If database shows free and RevenueCat not available, check RevenueCat API as fallback
     if (!isPremium && this.revenueCatService) {
       try {
+        // RevenueCat uses Supabase UUID (which is the user ID)
         const rcInfo = await this.revenueCatService.getCustomerInfo(userId);
-        const rcIsPremium = !!rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
+        const rcIsPremium =
+          !!rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
 
         if (rcIsPremium) {
           // Sync RevenueCat status to database
-          const entitlement = rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
+          const entitlement =
+            rcInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
           const expiresDate = entitlement.expires_date
             ? new Date(entitlement.expires_date)
             : null;
@@ -307,9 +423,7 @@ export class UsersService {
           await this.updateUser(userId, {
             subscriptionTier: 'premium',
             subscriptionStatus: 'active',
-            subscriptionExpiresAt: expiresDate
-              ? Timestamp.fromDate(expiresDate)
-              : undefined,
+            subscriptionExpiresAt: expiresDate || undefined,
           });
 
           isPremium = true;
@@ -330,14 +444,15 @@ export class UsersService {
     // Re-fetch user to get updated subscription status if it was synced
     const updatedUser = isPremium ? await this.getUserById(userId) : user;
 
-    return {
+    const result = {
       tier: updatedUser?.subscriptionTier || user.subscriptionTier,
       status: updatedUser?.subscriptionStatus || user.subscriptionStatus,
       expiresAt:
-        updatedUser?.subscriptionExpiresAt?.toDate().toISOString() ||
-        user.subscriptionExpiresAt?.toDate().toISOString(),
+        updatedUser?.subscriptionExpiresAt?.toISOString() ||
+        user.subscriptionExpiresAt?.toISOString(),
       isPremium,
     };
+    return result;
   }
 
   async isPremiumUser(userId: string): Promise<boolean> {
@@ -393,17 +508,17 @@ export class UsersService {
     }
 
     // Find user with this referral code
-    const referrerSnapshot = await this.firestore
-      .collection('users')
-      .where('referralCode', '==', referralCode.toUpperCase())
-      .limit(1)
-      .get();
+    const { data: referrers, error: referrerError } = await this.supabase
+      .from('users')
+      .select('id, referral_rewards')
+      .eq('referral_code', referralCode.toUpperCase())
+      .limit(1);
 
-    if (referrerSnapshot.empty) {
+    if (referrerError || !referrers || referrers.length === 0) {
       return { success: false, message: 'Invalid referral code' };
     }
 
-    const referrer = referrerSnapshot.docs[0];
+    const referrer = referrers[0];
     const referrerId = referrer.id;
 
     // Can't refer yourself
@@ -414,44 +529,48 @@ export class UsersService {
       };
     }
 
-    const now = Timestamp.now();
-
-    // Update referee (this user)
-    await this.firestore.collection('users').doc(userId).update({
-      referredBy: referrerId,
-      updatedAt: now,
-    });
+    const now = new Date();
 
     // Award rewards to both parties
     const freeMonths = 1; // 1 month free premium for both
 
-    // Award to referrer
-    const referrerData = referrer.data() as User;
-    const referrerRewards = referrerData.referralRewards || {
+    // Get referrer's current rewards
+    const referrerRewards = referrer.referral_rewards || {
       freeMonthsEarned: 0,
     };
-    await this.firestore
-      .collection('users')
-      .doc(referrerId)
+
+    // Update referee (this user)
+    await this.supabase
+      .from('users')
       .update({
-        referralRewards: {
+        referred_by: referrerId,
+        updated_at: now.toISOString(),
+      })
+      .eq('id', userId);
+
+    // Award to referrer
+    await this.supabase
+      .from('users')
+      .update({
+        referral_rewards: {
           freeMonthsEarned: referrerRewards.freeMonthsEarned + freeMonths,
-          lastRewardDate: now,
+          lastRewardDate: now.toISOString(),
         },
-        updatedAt: now,
-      });
+        updated_at: now.toISOString(),
+      })
+      .eq('id', referrerId);
 
     // Award to referee (this user)
-    await this.firestore
-      .collection('users')
-      .doc(userId)
+    await this.supabase
+      .from('users')
       .update({
-        referralRewards: {
+        referral_rewards: {
           freeMonthsEarned: freeMonths,
-          lastRewardDate: now,
+          lastRewardDate: now.toISOString(),
         },
-        updatedAt: now,
-      });
+        updated_at: now.toISOString(),
+      })
+      .eq('id', userId);
 
     // Apply free months to premium subscription if applicable
     // This would typically extend subscriptionExpiresAt
@@ -479,11 +598,9 @@ export class UsersService {
    * ```
    */
   async getReferralStats(userId: string): Promise<{
-    referralCode: string | undefined;
-    referredBy: string | undefined;
-    rewards:
-      | { freeMonthsEarned: number; lastRewardDate?: Timestamp }
-      | undefined;
+    referralCode?: string;
+    referredBy?: string;
+    rewards?: { freeMonthsEarned: number; lastRewardDate?: Date };
     referralsCount: number;
   }> {
     const user = await this.getUserById(userId);
@@ -492,16 +609,22 @@ export class UsersService {
     }
 
     // Count how many users this user has referred
-    const referralsSnapshot = await this.firestore
-      .collection('users')
-      .where('referredBy', '==', userId)
-      .get();
+    const { count, error } = await this.supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .eq('referred_by', userId);
+
+    if (error) {
+      this.logger.error(
+        `Error counting referrals for user ${userId}: ${error.message}`,
+      );
+    }
 
     return {
       referralCode: user.referralCode,
       referredBy: user.referredBy,
       rewards: user.referralRewards,
-      referralsCount: referralsSnapshot.size,
+      referralsCount: count || 0,
     };
   }
 }

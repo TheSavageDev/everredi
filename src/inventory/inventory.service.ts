@@ -1,12 +1,14 @@
 import {
   ForbiddenException,
   Injectable,
+  Inject,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
+import { TenantsService } from '../tenants/tenants.service';
 
 const logger = new Logger('InventoryService');
 
@@ -21,77 +23,205 @@ export interface InventoryItem {
   kitId?: string; // Optional: if this item belongs to a specific kit
   kitName?: string; // Optional: name of the kit this item belongs to
   quantity: number;
-  expirationDate?: Timestamp;
-  purchaseDate?: Timestamp;
+  expirationDate?: Date;
+  purchaseDate?: Date;
   purchasePrice?: number;
   supplier?: string;
   notes?: string;
   status: 'active' | 'expired' | 'used' | 'disposed';
   sentNotifications?: string[]; // Array of days for which notifications have been sent (e.g., ['60', '30', '10', '1'])
   customFields?: Record<string, string | number | boolean | null>; // Custom field values keyed by fieldId
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Helper function to convert PostgreSQL row to InventoryItem
+function rowToInventoryItem(row: any): InventoryItem {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    supplyId: row.supply_id,
+    supplyName: row.supply_name,
+    supplyCategoryId: row.supply_category_id,
+    locationId: row.location_id,
+    locationName: row.location_name,
+    kitId: row.kit_id,
+    kitName: row.kit_name,
+    quantity: row.quantity,
+    expirationDate: row.expiration_date
+      ? new Date(row.expiration_date)
+      : undefined,
+    purchaseDate: row.purchase_date
+      ? new Date(row.purchase_date)
+      : undefined,
+    purchasePrice: row.purchase_price,
+    supplier: row.supplier,
+    notes: row.notes,
+    status: row.status,
+    sentNotifications: row.sent_notifications || [],
+    customFields: row.custom_fields,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 @Injectable()
 export class InventoryService {
   constructor(
-    private readonly firebaseService: FirebaseService,
+    @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   /**
-   * Converts a date value (string, Timestamp, or object with toDate) to a Firestore Timestamp
+   * Converts a date value (string or object with toDate) to a Date
    */
-  private convertToTimestamp(
-    dateValue: string | Timestamp | { toDate: () => Date } | undefined,
-  ): Timestamp | undefined {
+  private convertToDate(
+    dateValue: string | { toDate: () => Date } | Date | undefined,
+  ): Date | undefined {
     if (!dateValue) {
       return undefined;
     }
-    if (typeof dateValue === 'string') {
-      return Timestamp.fromDate(new Date(dateValue));
-    }
-    if (dateValue instanceof Timestamp) {
+    if (dateValue instanceof Date) {
       return dateValue;
     }
-    // Handle Firestore Timestamp-like objects
+    if (typeof dateValue === 'string') {
+      return new Date(dateValue);
+    }
+    // Handle objects with toDate method (for backward compatibility)
     if (
       typeof dateValue === 'object' &&
       'toDate' in dateValue &&
       typeof dateValue.toDate === 'function'
     ) {
-      return Timestamp.fromDate(dateValue.toDate());
+      return dateValue.toDate();
     }
     return undefined;
   }
 
   async getInventoryItems(userId: string): Promise<InventoryItem[]> {
-    return this.firebaseService.getSubcollection<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-    );
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+
+    // Try new schema first (with inventory_lots), fall back to old schema if table doesn't exist
+    let data: any[] | null = null;
+    let error: any = null;
+    
+    // Try to get inventory items with lots (new schema)
+    const result = await this.supabase
+      .from('inventory_items')
+      .select(`
+        *,
+        inventory_lots(
+          id,
+          quantity_units,
+          expiration_date,
+          purchase_date,
+          purchase_price,
+          supplier,
+          status
+        )
+      `)
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false); // Only get actual items, not requirements
+    
+    data = result.data;
+    error = result.error;
+    
+    // If error is about missing relationship/table, fall back to old schema
+    if (error && (error.message?.includes('relationship') || error.message?.includes('schema cache') || error.code === 'PGRST202')) {
+      logger.warn('inventory_lots table not found, using old schema');
+      // Fall back to old schema (no lots)
+      const oldResult = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .eq('is_requirement', false);
+      
+      if (oldResult.error) {
+        logger.error(`Error fetching inventory items: ${oldResult.error.message}`);
+        throw new Error(`Failed to get inventory items: ${oldResult.error.message}`);
+      }
+      
+      // Return items in old format (no lots aggregation)
+      return (oldResult.data || []).map((item: any) => rowToInventoryItem(item));
+    }
+
+    if (error) {
+      logger.error(`Error fetching inventory items: ${error.message}`);
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
+
+    // Aggregate quantities from lots and use earliest expiration
+    return (data || []).map((item: any) => {
+      const lots = item.inventory_lots || [];
+      const activeLots = lots.filter((lot: any) => lot.status === 'active');
+      
+      // Calculate total quantity from active lots
+      const totalQuantity = activeLots.reduce(
+        (sum: number, lot: any) => sum + (lot.quantity_units || 0),
+        0
+      );
+      
+      // Get earliest expiration date from active lots
+      const expirationDates = activeLots
+        .map((lot: any) => lot.expiration_date)
+        .filter((date: any) => date)
+        .sort();
+      const earliestExpiration = expirationDates.length > 0 
+        ? new Date(expirationDates[0]) 
+        : undefined;
+      
+      // Use first lot's purchase info
+      const firstLot = activeLots[0] || lots[0];
+      const purchaseDate = firstLot?.purchase_date ? new Date(firstLot.purchase_date) : undefined;
+      const purchasePrice = firstLot?.purchase_price;
+      const supplier = firstLot?.supplier;
+      
+      // Determine status: if all lots are expired/used/disposed, item is expired/used/disposed
+      const allExpired = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'expired');
+      const allUsed = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'used');
+      const allDisposed = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'disposed');
+      
+      let status = item.status;
+      if (allExpired) status = 'expired';
+      else if (allUsed) status = 'used';
+      else if (allDisposed) status = 'disposed';
+      else if (activeLots.length > 0) status = 'active';
+      
+      const baseItem = rowToInventoryItem(item);
+      return {
+        ...baseItem,
+        quantity: totalQuantity, // Aggregate from lots
+        expirationDate: earliestExpiration,
+        purchaseDate,
+        purchasePrice,
+        supplier,
+        status,
+      };
+    });
   }
 
   async getInventoryItem(
     userId: string,
     itemId: string,
   ): Promise<InventoryItem> {
-    const item =
-      await this.firebaseService.getSubcollectionDocument<InventoryItem>(
-        'users',
-        userId,
-        'inventoryItems',
-        itemId,
-        { throwIfNotFound: true },
-      );
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('id', itemId)
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false) // Only get actual items, not requirements
+      .single();
 
-    if (!item) {
+    if (error || !data) {
       throw new NotFoundException('Inventory item not found');
     }
 
-    return item;
+    return rowToInventoryItem(data);
   }
 
   /**
@@ -100,7 +230,7 @@ export class InventoryService {
    * This method:
    * - Checks if user is premium (premium users have unlimited items)
    * - For free users, enforces a limit of 100 active inventory items
-   * - Converts date strings to Firestore Timestamps
+   * - Converts date strings to PostgreSQL timestamps
    * - Initializes sentNotifications array for items with expiration dates
    *
    * @param userId - The ID of the user creating the item
@@ -124,21 +254,26 @@ export class InventoryService {
     itemData: Omit<
       InventoryItem,
       'id' | 'userId' | 'createdAt' | 'updatedAt' | 'sentNotifications'
-    >,
+    > & { kitId?: string }, // kit_id for items in kits (nullable)
   ): Promise<InventoryItem> {
     const isPremium = await this.usersService.isPremiumUser(userId);
 
     if (!isPremium) {
-      const activeItems = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'inventoryItems',
-        {
-          where: [{ field: 'status', operator: '==', value: 'active' }],
-        },
-      );
+      // Get user's tenant for scoping
+      const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+      
+      const { count, error: countError } = await this.supabase
+        .from('inventory_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', tenant.id)
+        .eq('is_requirement', false) // Only count actual items, not requirements
+        .eq('status', 'active');
 
-      const activeCount = activeItems.length;
+      if (countError) {
+        logger.error(`Error counting inventory items: ${countError.message}`);
+      }
+
+      const activeCount = count || 0;
       const maxFreeItems = 100;
 
       if (activeCount >= maxFreeItems) {
@@ -150,48 +285,115 @@ export class InventoryService {
       }
     }
 
-    const now = Timestamp.now();
+    const now = new Date();
 
-    // Convert date strings to Firestore Timestamps
-    const expirationTimestamp = this.convertToTimestamp(
-      itemData.expirationDate,
-    );
-    const purchaseTimestamp = this.convertToTimestamp(itemData.purchaseDate);
+    // Convert date strings to Date objects
+    const expirationDate = this.convertToDate(itemData.expirationDate);
+    const purchaseDate = this.convertToDate(itemData.purchaseDate);
 
-    // Build document data, omitting undefined values
-    const documentData: Record<string, unknown> = {
-      userId,
-      createdAt: now,
-      updatedAt: now,
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
+    // Use kitId directly (containers table was removed)
+    let kitId = (itemData as any).kitId || (itemData as any).containerId;
+    
+    // If no kitId and requireKit is true, create a default kit for user's tenant
+    // Note: kit_id can be NULL for standalone inventory (not in a kit)
+    if (!kitId && (itemData as any).requireKit) {
+      // Try to find an existing default kit
+      const { data: defaultKit } = await this.supabase
+        .from('kits')
+        .select('id')
+        .eq('tenant_id', tenant.id)
+        .eq('name', 'Default Kit')
+        .is('deleted_at', null)
+        .single();
+      
+      if (defaultKit) {
+        kitId = defaultKit.id;
+      } else {
+        // Create default kit
+        const { data: newKit } = await this.supabase
+          .from('kits')
+          .insert({
+            tenant_id: tenant.id,
+            name: 'Default Kit',
+            status: 'active',
+          })
+          .select()
+          .single();
+        
+        if (newKit) {
+          kitId = newKit.id;
+        }
+      }
+    }
+
+    // Create inventory_item (aggregate) - note: quantity is now in lots
+    const insertData: any = {
+      tenant_id: tenant.id,
+      kit_id: kitId || null, // NULL for standalone inventory
+      supply_id: itemData.supplyId || null,
+      freeform_name: !itemData.supplyId ? itemData.supplyName : null,
+      supply_name: itemData.supplyName,
+      supply_category_id: itemData.supplyCategoryId,
+      location_id: itemData.locationId,
+      location_name: itemData.locationName,
+      is_requirement: false, // This is an actual item, not a requirement
+      status: itemData.status || 'active',
+      notes: itemData.notes,
+      custom_fields: itemData.customFields,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
     };
 
-    // Only include fields that are not undefined
-    Object.keys(itemData).forEach((key) => {
-      const value = itemData[key as keyof typeof itemData];
-      if (value !== undefined) {
-        documentData[key] = value;
-      }
-    });
-
-    // Set converted timestamps
-    if (expirationTimestamp) {
-      documentData.expirationDate = expirationTimestamp;
-    }
-    if (purchaseTimestamp) {
-      documentData.purchaseDate = purchaseTimestamp;
-    }
-
-    // Initialize sentNotifications as empty array for items with expiration dates
-    if (expirationTimestamp) {
-      documentData.sentNotifications = [];
-    }
-
-    return this.firebaseService.addSubcollectionDocument<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-      documentData as Partial<InventoryItem>,
+    // Filter out undefined values
+    const filteredData = Object.fromEntries(
+      Object.entries(insertData).filter(([, value]) => value !== undefined),
     );
+
+    const { data: inventoryItem, error: itemError } = await this.supabase
+      .from('inventory_items')
+      .insert(filteredData)
+      .select()
+      .single();
+
+    if (itemError) {
+      throw new Error(`Failed to create inventory item: ${itemError.message}`);
+    }
+
+    // Create inventory_lot with quantity and expiration
+    if (inventoryItem) {
+      const lotData: any = {
+        inventory_item_id: inventoryItem.id,
+        quantity_units: itemData.quantity,
+        expiration_date: expirationDate ? expirationDate.toISOString().split('T')[0] : null,
+        purchase_date: purchaseDate ? purchaseDate.toISOString().split('T')[0] : null,
+        purchase_price: itemData.purchasePrice,
+        supplier: itemData.supplier,
+        status: itemData.status === 'expired' ? 'expired' : 
+                itemData.status === 'used' ? 'used' :
+                itemData.status === 'disposed' ? 'disposed' : 'active',
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      };
+
+      const { error: lotError } = await this.supabase
+        .from('inventory_lots')
+        .insert(lotData);
+
+      if (lotError) {
+        logger.error(`Failed to create inventory lot: ${lotError.message}`);
+      }
+    }
+
+    // Return in old format for backward compatibility
+    return {
+      ...rowToInventoryItem(inventoryItem),
+      quantity: itemData.quantity,
+      expirationDate,
+      purchaseDate,
+    };
   }
 
   async updateInventoryItem(
@@ -199,122 +401,178 @@ export class InventoryService {
     itemId: string,
     updates: Partial<InventoryItem>,
   ): Promise<InventoryItem> {
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
     // Get current item to check expiration date changes
-    const currentItem =
-      await this.firebaseService.getSubcollectionDocument<InventoryItem>(
-        'users',
-        userId,
-        'inventoryItems',
-        itemId,
-        { throwIfNotFound: true },
-      );
+    const { data: currentItem, error: fetchError } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('id', itemId)
+      .eq('tenant_id', tenant.id)
+      .single();
 
-    if (!currentItem) {
+    if (fetchError || !currentItem) {
       throw new NotFoundException('Inventory item not found');
     }
 
-    const oldExpirationDate = currentItem.expirationDate;
+    const oldExpirationDate = currentItem.expiration_date
+      ? new Date(currentItem.expiration_date)
+      : null;
 
-    // Convert date strings to Firestore Timestamps in updates
-    const processedUpdates: Record<string, unknown> = { ...updates };
-    const newExpirationTimestamp = this.convertToTimestamp(
-      updates.expirationDate,
-    );
-    const newPurchaseTimestamp = this.convertToTimestamp(updates.purchaseDate);
+    // Convert date strings to Date objects in updates
+    const processedUpdates: any = {};
+    const newExpirationDate = this.convertToDate(updates.expirationDate);
+    const newPurchaseDate = this.convertToDate(updates.purchaseDate);
 
-    if (newExpirationTimestamp !== undefined) {
-      processedUpdates.expirationDate = newExpirationTimestamp;
+    // Map interface fields to database columns
+    if (updates.supplyId !== undefined)
+      processedUpdates.supply_id = updates.supplyId;
+    if (updates.supplyName !== undefined)
+      processedUpdates.supply_name = updates.supplyName;
+    if (updates.supplyCategoryId !== undefined)
+      processedUpdates.supply_category_id = updates.supplyCategoryId;
+    if (updates.locationId !== undefined)
+      processedUpdates.location_id = updates.locationId;
+    if (updates.locationName !== undefined)
+      processedUpdates.location_name = updates.locationName;
+    if (updates.kitId !== undefined) processedUpdates.kit_id = updates.kitId;
+    if (updates.kitName !== undefined)
+      processedUpdates.kit_name = updates.kitName;
+    if (updates.quantity !== undefined)
+      processedUpdates.quantity = updates.quantity;
+    if (updates.purchasePrice !== undefined)
+      processedUpdates.purchase_price = updates.purchasePrice;
+    if (updates.supplier !== undefined)
+      processedUpdates.supplier = updates.supplier;
+    if (updates.notes !== undefined) processedUpdates.notes = updates.notes;
+    if (updates.status !== undefined) processedUpdates.status = updates.status;
+    if (updates.customFields !== undefined)
+      processedUpdates.custom_fields = updates.customFields;
+
+    if (newExpirationDate !== undefined) {
+      processedUpdates.expiration_date = newExpirationDate.toISOString();
     }
-    if (newPurchaseTimestamp !== undefined) {
-      processedUpdates.purchaseDate = newPurchaseTimestamp;
+    if (newPurchaseDate !== undefined) {
+      processedUpdates.purchase_date = newPurchaseDate.toISOString();
     }
 
     // Handle expiration date changes - reset sentNotifications if expiration date changed
-    if (newExpirationTimestamp !== undefined) {
+    if (newExpirationDate !== undefined) {
       const expirationChanged =
         !oldExpirationDate ||
-        oldExpirationDate.toDate().getTime() !==
-          newExpirationTimestamp.toDate().getTime();
+        oldExpirationDate.getTime() !== newExpirationDate.getTime();
 
       if (expirationChanged) {
         // Reset sent notifications so cron job can send new alerts for the new expiration date
-        processedUpdates.sentNotifications = [];
+        processedUpdates.sent_notifications = [];
         logger.log(
           `Expiration date changed for item ${itemId}, resetting sent notifications`,
         );
       }
     } else if (updates.expirationDate === null) {
       // Expiration date was removed - clear sent notifications
-      processedUpdates.sentNotifications = [];
+      processedUpdates.expiration_date = null;
+      processedUpdates.sent_notifications = [];
     }
 
-    // Filter out undefined values before updating
+    processedUpdates.updated_at = new Date().toISOString();
+
+    // Filter out undefined values
     const updateData = Object.fromEntries(
       Object.entries(processedUpdates).filter(
         ([, value]) => value !== undefined,
       ),
-    ) as Partial<InventoryItem>;
-
-    return this.firebaseService.updateSubcollectionDocument<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-      itemId,
-      {
-        ...updateData,
-        updatedAt: Timestamp.now(),
-      },
     );
+
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .update(updateData)
+      .eq('id', itemId)
+      .eq('tenant_id', tenant.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update inventory item: ${error.message}`);
+    }
+
+    return rowToInventoryItem(data);
   }
 
   async deleteInventoryItem(userId: string, itemId: string): Promise<void> {
-    await this.firebaseService.deleteSubcollectionDocument(
-      'users',
-      userId,
-      'inventoryItems',
-      itemId,
-    );
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
+    const { error } = await this.supabase
+      .from('inventory_items')
+      .delete()
+      .eq('id', itemId)
+      .eq('tenant_id', tenant.id);
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        throw new NotFoundException('Inventory item not found');
+      }
+      throw new Error(`Failed to delete inventory item: ${error.message}`);
+    }
   }
 
   async searchInventoryItems(
     userId: string,
     term: string,
   ): Promise<InventoryItem[]> {
-    const allItems = await this.firebaseService.getSubcollection<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-    );
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false); // Only search actual items, not requirements
+
+    if (error) {
+      logger.error(`Error fetching inventory items: ${error.message}`);
+      return [];
+    }
 
     const searchTerm = term.toLowerCase();
-    return allItems.filter(
-      (item) =>
-        item.supplyName?.toLowerCase().includes(searchTerm) ||
-        item.notes?.toLowerCase().includes(searchTerm),
-    );
+    return (data || [])
+      .map(rowToInventoryItem)
+      .filter(
+        (item) =>
+          item.supplyName?.toLowerCase().includes(searchTerm) ||
+          item.notes?.toLowerCase().includes(searchTerm),
+      );
   }
 
   async getExpiringItems(
     userId: string,
     days?: number,
   ): Promise<InventoryItem[]> {
-    const thresholdDate = Timestamp.fromDate(
-      new Date(Date.now() + (days || 30) * 24 * 60 * 60 * 1000),
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    
+    const thresholdDate = new Date(
+      Date.now() + (days || 30) * 24 * 60 * 60 * 1000,
     );
-    const now = Timestamp.now();
+    const now = new Date();
 
-    return this.firebaseService.getSubcollection<InventoryItem>(
-      'users',
-      userId,
-      'inventoryItems',
-      {
-        where: [
-          { field: 'status', operator: '==', value: 'active' },
-          { field: 'expirationDate', operator: '>=', value: now },
-          { field: 'expirationDate', operator: '<=', value: thresholdDate },
-        ],
-        orderBy: { field: 'expirationDate', direction: 'asc' },
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false) // Only get actual items, not requirements
+      .eq('status', 'active')
+      .gte('expiration_date', now.toISOString())
+      .lte('expiration_date', thresholdDate.toISOString())
+      .order('expiration_date', { ascending: true });
+
+    if (error) {
+      logger.error(`Error fetching expiring items: ${error.message}`);
+      return [];
+    }
+
+    return (data || []).map(rowToInventoryItem);
   }
 }

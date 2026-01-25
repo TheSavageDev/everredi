@@ -1,22 +1,19 @@
 import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
-import { PremiumGuard } from '../common/guards/premium.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiService } from './ai.service';
 import type { AiRecommendationRequest } from './ai.service';
-import { Premium } from '../common/decorators/premium.decorator';
 
 interface CurrentUserPayload {
   uid: string;
 }
 
 @Controller('ai')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard)
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post('recommendations')
-  @Premium()
   async getRecommendation(
     @CurrentUser() user: CurrentUserPayload,
     @Body() request: AiRecommendationRequest,
@@ -34,7 +31,6 @@ export class AiController {
   }
 
   @Get('recommendations')
-  @Premium()
   async getRecommendations(@CurrentUser() user: CurrentUserPayload) {
     const recommendations = await this.aiService.getRecommendations(user.uid);
     return {

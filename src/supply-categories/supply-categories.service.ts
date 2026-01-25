@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 
 export interface SupplyCategory {
   id: string;
@@ -13,24 +14,50 @@ export interface SupplyCategory {
   updatedAt: any;
 }
 
+// Helper function to convert PostgreSQL row to SupplyCategory
+function rowToSupplyCategory(row: any): SupplyCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    parentCategoryId: row.parent_category_id,
+    parentCategoryPath: row.parent_category_path,
+    iconName: row.icon_name,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 @Injectable()
 export class SupplyCategoriesService {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   async getCategories(): Promise<SupplyCategory[]> {
-    return this.firebaseService.getCollection<SupplyCategory>(
-      'supplyCategories',
-      {
-        where: [{ field: 'isActive', operator: '==', value: true }],
-        orderBy: { field: 'sortOrder', direction: 'asc' },
-      },
-    );
+    const { data, error } = await this.supabase
+      .from('supply_categories')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to get categories: ${error.message}`);
+    }
+
+    return (data || []).map(rowToSupplyCategory);
   }
 
   async getCategory(categoryId: string): Promise<SupplyCategory | null> {
-    return this.firebaseService.getDocument<SupplyCategory>(
-      'supplyCategories',
-      categoryId,
-    );
+    const { data, error } = await this.supabase
+      .from('supply_categories')
+      .select('*')
+      .eq('id', categoryId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return rowToSupplyCategory(data);
   }
 }

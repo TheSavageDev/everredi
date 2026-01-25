@@ -9,7 +9,6 @@ import { PushNotificationService } from './push-notification.service';
 import { DeviceTokensService } from './device-tokens.service';
 import { ExpirationNotificationsService } from './expiration-notifications.service';
 import { AdvancedNotificationsService } from './advanced-notifications.service';
-import { firestoreProvider } from '../config/firebase.provider';
 import { UsersModule } from '../users/users.module';
 
 @Module({
@@ -26,7 +25,6 @@ import { UsersModule } from '../users/users.module';
     DeviceTokensService,
     ExpirationNotificationsService,
     AdvancedNotificationsService,
-    firestoreProvider,
   ],
   imports: [UsersModule],
   exports: [

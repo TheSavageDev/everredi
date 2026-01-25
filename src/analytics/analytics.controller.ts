@@ -1,12 +1,12 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
 import { Premium } from '../common/decorators/premium.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard, PremiumGuard)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 

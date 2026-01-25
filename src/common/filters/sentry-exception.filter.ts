@@ -71,9 +71,7 @@ export class SentryExceptionFilter implements ExceptionFilter {
             ? String(responseObj.message)
             : exception.message;
         code =
-          responseObj.code !== undefined
-            ? String(responseObj.code)
-            : undefined;
+          responseObj.code !== undefined ? String(responseObj.code) : undefined;
       } else {
         message = exception.message;
       }

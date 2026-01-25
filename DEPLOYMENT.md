@@ -5,7 +5,9 @@ This document describes how to deploy the Everredi backend to Google Cloud Run u
 ## Architecture
 
 - **Single GCP Project**: All environments (dev, staging, production) use the same GCP project
-- **Multiple Firestore Databases**: Each environment uses a separate Firestore database
+- **Supabase Projects**: 
+  - **Dev/Test/Staging**: Share a single Supabase project (cost-effective for development)
+  - **Production**: Separate Supabase project (isolated for production data)
 - **Cloud Run Services**: Separate Cloud Run services per environment
 - **CI/CD**: Automated builds and deployments via Cloud Build
 
@@ -13,17 +15,17 @@ This document describes how to deploy the Everredi backend to Google Cloud Run u
 
 1. **Dev/Test** (`main` branch)
    - Service: `everredi-api-dev`
-   - Firestore Database: `(default)` or `dev`
+   - Supabase Project: Shared dev/staging project
    - Trigger: Push to `main` branch
 
 2. **Staging** (`rc_*` tags)
    - Service: `everredi-api-staging`
-   - Firestore Database: `staging`
+   - Supabase Project: Shared dev/staging project (same as dev)
    - Trigger: Tag matching `rc_*` (e.g., `rc_1.0.0`)
 
 3. **Production** (`prod_*` tags)
    - Service: `everredi-api-prod`
-   - Firestore Database: `prod`
+   - Supabase Project: Separate production project
    - Trigger: Tag matching `prod_*` (e.g., `prod_1.0.0`)
 
 ## Prerequisites
@@ -33,7 +35,7 @@ This document describes how to deploy the Everredi backend to Google Cloud Run u
 3. Cloud Run API enabled
 4. Container Registry API enabled
 5. Secret Manager API enabled
-6. Firestore API enabled
+6. Supabase projects created for each environment
 7. GitHub/GitLab repository connected to Cloud Build
 
 ## Initial Setup: Grant Cloud Build Permissions
@@ -42,7 +44,7 @@ Before creating triggers, you must grant the Cloud Build service account necessa
 
 ```bash
 # Run the setup script
-cd backend
+cd api
 ./setup-cloud-build-permissions.sh
 
 # Or manually grant permissions:
@@ -104,7 +106,7 @@ This can happen for several reasons:
 1. **Service accounts need permissions** - Run the setup script:
 
    ```bash
-   cd backend
+   cd api
    ./setup-cloud-build-permissions.sh
    ```
 
@@ -140,42 +142,89 @@ This can happen for several reasons:
 
 ## Setup Steps
 
-### 1. Create Firestore Databases
+### 1. Create Supabase Projects
 
-For each environment, create a Firestore database in your GCP project:
+Create Supabase projects for your environments:
 
-```bash
-# Dev/Test (uses default database, or create named 'dev')
-gcloud firestore databases create --database=dev --location=us-central1
+1. Go to [Supabase Dashboard](https://app.supabase.com)
+2. Create projects:
+   - **Development/Staging**: `everredi-dev` (or similar) - Shared project for dev, test, and staging environments
+   - **Production**: `everredi-prod` - Separate production project
 
-# Staging
-gcloud firestore databases create --database=staging --location=us-central1
+**Note**: Dev, test, and staging share the same Supabase project to minimize costs during development. Production uses a separate project for data isolation and security.
 
-# Production
-gcloud firestore databases create --database=prod --location=us-central1
-```
+3. For each project, get:
+   - **Project URL**: Found in Project Settings → API (e.g., `https://xxxxx.supabase.co`)
+   - **Service Role Key**: Found in Project Settings → API → Service Role Key (format: `sb_secret_...` or legacy `service_role` key)
+
+4. Run the database migrations:
+
+   **Option 1: Using Supabase SQL Editor (Recommended)**
+   
+   1. Go to your Supabase project dashboard
+   2. Navigate to SQL Editor
+   3. Run the consolidated schema migration:
+      - Copy contents of `api/migrations/000_consolidated_schema.sql`
+      - Paste into SQL Editor
+      - Execute
+   4. (Optional but recommended) Run the supply catalog seed:
+      - Copy contents of `api/migrations/001_seed_supply_catalog.sql`
+      - Paste into SQL Editor
+      - Execute
+   
+   **Option 2: Using psql**
+   
+   ```bash
+   # Get connection string from Supabase Dashboard → Settings → Database
+   # Run consolidated schema
+   psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" -f api/migrations/000_consolidated_schema.sql
+   
+   # Run seed catalog (optional but recommended)
+   psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" -f api/migrations/001_seed_supply_catalog.sql
+   ```
+   
+   **Note**: The seed catalog (`001_seed_supply_catalog.sql`) is safe to run multiple times as it uses `ON CONFLICT DO NOTHING` to prevent duplicates.
+
+5. Configure OAuth providers in Supabase Dashboard → Authentication → Providers (Google, Apple, etc.)
 
 ### 2. Store Secrets in Secret Manager
 
 Create secrets for sensitive configuration:
 
 ```bash
-# For each environment (dev, staging, prod), create secrets:
+# Dev and Staging share the same Supabase project, so they use the same Supabase secrets
+# Production uses a separate Supabase project
 
-# Dev environment
-echo -n "YOUR_DEV_PRIVATE_KEY" | gcloud secrets create firebase-private-key-dev --data-file=-
-echo -n "firebase-adminsdk-xxxxx@project-id.iam.gserviceaccount.com" | gcloud secrets create firebase-client-email-dev --data-file=-
+# Dev environment (shared Supabase with staging)
+echo -n "https://xxxxx-dev.supabase.co" | gcloud secrets create supabase-url-dev --data-file=-
+echo -n "sb_secret_xxxxx..." | gcloud secrets create supabase-secret-key-dev --data-file=-
 echo -n "sk_test_xxxxx" | gcloud secrets create stripe-secret-key-dev --data-file=-
 echo -n "whsec_test_xxxxx" | gcloud secrets create stripe-webhook-secret-dev --data-file=-
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-dev --data-file=-
+# RevenueCat (optional but recommended for mobile subscriptions)
+echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-dev --data-file=-
 
-# Staging environment (repeat with staging values)
-echo -n "YOUR_STAGING_PRIVATE_KEY" | gcloud secrets create firebase-private-key-staging --data-file=-
-# ... repeat for other secrets with -staging suffix
+# Staging environment (shares Supabase with dev - copy the same values)
+echo -n "https://xxxxx-dev.supabase.co" | gcloud secrets create supabase-url-staging --data-file=-
+echo -n "sb_secret_xxxxx..." | gcloud secrets create supabase-secret-key-staging --data-file=-
+# Or copy from dev secrets:
+# DEV_URL=$(gcloud secrets versions access latest --secret=supabase-url-dev)
+# DEV_KEY=$(gcloud secrets versions access latest --secret=supabase-secret-key-dev)
+# echo -n "$DEV_URL" | gcloud secrets create supabase-url-staging --data-file=-
+# echo -n "$DEV_KEY" | gcloud secrets create supabase-secret-key-staging --data-file=-
 
-# Production environment (repeat with prod values)
-echo -n "YOUR_PROD_PRIVATE_KEY" | gcloud secrets create firebase-private-key-prod --data-file=-
-# ... repeat for other secrets with -prod suffix
+echo -n "sk_test_xxxxx" | gcloud secrets create stripe-secret-key-staging --data-file=-
+echo -n "whsec_test_xxxxx" | gcloud secrets create stripe-webhook-secret-staging --data-file=-
+echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-staging --data-file=-
+echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-staging --data-file=-
+
+# Production environment (separate Supabase project)
+echo -n "https://xxxxx-prod.supabase.co" | gcloud secrets create supabase-url-prod --data-file=-
+echo -n "sb_secret_xxxxx..." | gcloud secrets create supabase-secret-key-prod --data-file=-
+echo -n "sk_live_xxxxx" | gcloud secrets create stripe-secret-key-prod --data-file=-
+echo -n "whsec_live_xxxxx" | gcloud secrets create stripe-webhook-secret-prod --data-file=-
+echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-prod --data-file=-
+echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-prod --data-file=-
 ```
 
 Grant Cloud Run service account access to secrets:
@@ -186,7 +235,7 @@ SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
 # Grant access to all environment secrets
 for env in dev staging prod; do
-  for secret in firebase-private-key firebase-client-email stripe-secret-key stripe-webhook-secret gemini-api-key; do
+  for secret in supabase-url supabase-secret-key stripe-secret-key stripe-webhook-secret gemini-api-key revenuecat-secret-api-key; do
     gcloud secrets add-iam-policy-binding ${secret}-${env} \
       --member="serviceAccount:${SERVICE_ACCOUNT}" \
       --role="roles/secretmanager.secretAccessor" || true
@@ -224,7 +273,6 @@ done
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `dev`
-     - `_DATABASE_ID`: `(default)`
      - `_CORS_ORIGIN`: `http://localhost:3000` (or your dev URL)
 
 #### Staging Trigger
@@ -241,8 +289,7 @@ done
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `staging`
-     - `_DATABASE_ID`: `staging`
-     - `_CORS_ORIGIN`: `https://staging.everredi.com` (or your staging URL)
+     - `_CORS_ORIGIN`: `https://staging.everredi.app` (or your staging URL)
 
 #### Production Trigger
 
@@ -258,8 +305,7 @@ done
    - **Service account**: Use default Cloud Build service account (`{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com`)
    - **Substitution variables**:
      - `_ENV`: `prod`
-     - `_DATABASE_ID`: `prod`
-     - `_CORS_ORIGIN`: `https://everredi.com`
+     - `_CORS_ORIGIN`: `https://everredi.app`
 
 ### 4. Service Account Selection
 
@@ -272,7 +318,7 @@ If you see: _"Your organization policy requires you to select a user-managed ser
 Run this script to create a custom service account:
 
 ```bash
-cd backend
+cd api
 ./create-cloud-build-sa.sh
 ```
 
@@ -329,15 +375,15 @@ Each trigger needs environment-specific substitution variables. You can set them
 ```bash
 # Dev/Test trigger
 gcloud builds triggers update main-deploy-dev \
-  --substitutions=_ENV=dev,_DATABASE_ID="(default)",_CORS_ORIGIN="http://localhost:3000"
+  --substitutions=_ENV=dev,_CORS_ORIGIN="http://localhost:3000"
 
 # Staging trigger
 gcloud builds triggers update staging-deploy \
-  --substitutions=_ENV=staging,_DATABASE_ID=staging,_CORS_ORIGIN="https://staging.everredi.com"
+  --substitutions=_ENV=staging,_CORS_ORIGIN="https://staging.everredi.app"
 
 # Production trigger
 gcloud builds triggers update production-deploy \
-  --substitutions=_ENV=prod,_DATABASE_ID=prod,_CORS_ORIGIN="https://everredi.com"
+  --substitutions=_ENV=prod,_CORS_ORIGIN="https://everredi.app"
 ```
 
 **Note**: The cloudbuild files have default values, but you should override them in the trigger configuration for production use.
@@ -384,8 +430,8 @@ gcloud builds submit --config=cloudbuild.prod.yaml --substitutions=TAG_NAME=prod
 
 ### Required Environment Variables
 
-- `FIREBASE_PROJECT_ID`: Your GCP project ID (set automatically in Cloud Build)
-- `FIREBASE_DATABASE_ID`: Firestore database name (`(default)`, `dev`, `staging`, `prod`)
+- `SUPABASE_URL`: Your Supabase project URL (set via Secret Manager)
+- `SUPABASE_SECRET_KEY`: Supabase service role key (set via Secret Manager)
 - `PORT`: Server port (default: 8080, set automatically by Cloud Run)
 - `NODE_ENV`: Node environment (`production`)
 
@@ -393,18 +439,39 @@ gcloud builds submit --config=cloudbuild.prod.yaml --substitutions=TAG_NAME=prod
 
 Secrets should be created with environment suffixes for isolation:
 
-- `firebase-private-key-{env}`: Firebase service account private key (dev, staging, prod)
-- `firebase-client-email-{env}`: Firebase service account email (dev, staging, prod)
+- `supabase-url-{env}`: Supabase project URL
+  - **Dev/Staging**: Share the same Supabase project (use same values)
+  - **Production**: Separate Supabase project
+- `supabase-secret-key-{env}`: Supabase service role key
+  - **Dev/Staging**: Share the same key (same Supabase project)
+  - **Production**: Separate key (separate Supabase project)
 - `stripe-secret-key-{env}`: Stripe API secret key (dev, staging, prod)
 - `stripe-webhook-secret-{env}`: Stripe webhook secret (dev, staging, prod)
 - `gemini-api-key-{env}`: Google Gemini API key (dev, staging, prod)
+- `revenuecat-secret-api-key-{env}`: RevenueCat Secret API Key (optional but recommended for mobile subscriptions)
 
-Example: `firebase-private-key-dev`, `firebase-private-key-staging`, `firebase-private-key-prod`
+Example: `supabase-url-dev`, `supabase-url-staging`, `supabase-url-prod`
+
+**Important**: Dev and staging share the same Supabase project to minimize costs. They should use the same Supabase URL and secret key values. Production uses a completely separate Supabase project for data isolation.
+
+**Note**: RevenueCat secrets are optional but required if you're using mobile app subscriptions. The API will function without them, but RevenueCat integration features will be disabled.
 
 ### Optional Environment Variables
 
 - `CORS_ORIGIN`: Allowed CORS origin (default: `http://localhost:3000`)
 - `GEMINI_MODEL`: Gemini model to use (default: `gemini-1.0-pro`)
+- `REVENUECAT_WEBHOOK_SECRET`: RevenueCat webhook verification secret (optional, for webhook security)
+
+### Sentry Configuration (Optional)
+
+Sentry is configured via Cloud Build substitution variables, not Secret Manager. These are set automatically in staging and production builds:
+
+- `SENTRY_DSN`: Sentry project DSN for error tracking (set via Cloud Build substitution `_SENTRY_DSN`)
+- `SENTRY_ENVIRONMENT`: Environment name for Sentry (auto-set: `dev`, `staging`, or `production`)
+- `SENTRY_RELEASE`: Release version for Sentry (auto-set from git commit SHA `$SHORT_SHA`)
+- `SENTRY_TRACES_SAMPLE_RATE`: Trace sampling rate (default: `0.1` for staging, `1.0` for production)
+
+To enable Sentry, set the `_SENTRY_DSN` substitution variable in your Cloud Build trigger configuration. If not set, Sentry will be disabled and the application will continue to function normally.
 
 ## Health Check
 
@@ -437,14 +504,22 @@ Response:
 
 - Check Cloud Run service logs
 - Verify environment variables are set correctly
-- Ensure Firestore databases exist
+- Ensure Supabase projects exist and are accessible
 - Check that secrets are accessible by Cloud Run service account
 
 ### Runtime Errors
 
 - Check Cloud Run logs: `gcloud run services logs read everredi-api-dev --region=us-central1`
-- Verify Firebase initialization in logs
-- Check that Firestore database ID matches environment
+- Verify Supabase initialization in logs
+- Check that Supabase URL and secret key are correct
+- Verify database migration has been run
+
+### Supabase Connection Issues
+
+- Verify `SUPABASE_URL` matches your Supabase project URL
+- Check that `SUPABASE_SECRET_KEY` is the service role key (not the anon key)
+- Ensure the database migration has been run
+- Check Supabase project status in the dashboard
 
 ## Cost Optimization
 
@@ -458,4 +533,5 @@ Response:
 - All secrets are stored in Secret Manager, not in code
 - Cloud Run services are publicly accessible (use Cloud Armor for additional protection)
 - CORS is configured per environment
-- Firestore databases are isolated per environment
+- Supabase projects are isolated per environment
+- Service role keys have admin privileges - keep them secret

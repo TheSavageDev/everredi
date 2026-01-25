@@ -1,10 +1,10 @@
 import { Controller, Post, UseGuards, Req, Logger } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
 import type { Request } from 'express';
 
-interface FirebaseUser {
+interface SupabaseUser {
   uid: string;
   email?: string;
   name?: string;
@@ -17,9 +17,9 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('create-or-update')
-  @UseGuards(FirebaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async createOrUpdateUser(
-    @CurrentUser() user: FirebaseUser,
+    @CurrentUser() user: SupabaseUser,
     @Req() request: Request,
   ) {
     // Log auth attempt for security monitoring

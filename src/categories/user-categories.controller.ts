@@ -8,13 +8,13 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { PremiumGuard } from '../common/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserCategoriesService } from './user-categories.service';
 
 @Controller('categories/user')
-@UseGuards(FirebaseAuthGuard, PremiumGuard)
+@UseGuards(SupabaseAuthGuard, PremiumGuard)
 export class UserCategoriesController {
   constructor(private readonly userCategoriesService: UserCategoriesService) {}
 

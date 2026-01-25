@@ -37,10 +37,10 @@ steps:
       - 'managed'
       - '--allow-unauthenticated'
       - '--set-env-vars'
-      - 'NODE_ENV=production,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_ID=${_DATABASE_ID},CORS_ORIGIN=${_CORS_ORIGIN},SENTRY_DSN=${_SENTRY_DSN},SENTRY_ENVIRONMENT=staging,SENTRY_RELEASE=$SHORT_SHA,SENTRY_TRACES_SAMPLE_RATE=0.1,NO_COLOR=not-empty'
+      - 'NODE_ENV=production,CORS_ORIGIN=${_CORS_ORIGIN},SENTRY_DSN=${_SENTRY_DSN},SENTRY_ENVIRONMENT=staging,SENTRY_RELEASE=$SHORT_SHA,SENTRY_TRACES_SAMPLE_RATE=0.1,NO_COLOR=not-empty'
       - '--cpu-boost'
       - '--set-secrets'
-      - 'FIREBASE_PRIVATE_KEY=firebase-private-key-${_ENV}:latest,FIREBASE_CLIENT_EMAIL=firebase-client-email-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest'
+      - 'SUPABASE_URL=supabase-url-${_ENV}:latest,SUPABASE_SECRET_KEY=supabase-secret-key-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest'
       - '--memory'
       - '512Mi'
       - '--cpu'
@@ -57,7 +57,6 @@ options:
 
 substitutions:
   _ENV: 'staging'
-  _DATABASE_ID: 'staging'
   _CORS_ORIGIN: 'https://staging.everredi.app'
   _SENTRY_DSN: '' # Set in trigger configuration
 

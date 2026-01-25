@@ -44,7 +44,6 @@ describe('UsersService', () => {
       exists: true,
       data: () => ({
         id: 'uid',
-        firebaseUid: 'uid',
         email: 'old@example.com',
         createdAt: now,
         updatedAt: now,
@@ -62,7 +61,6 @@ describe('UsersService', () => {
       exists: true,
       data: () => ({
         id: 'uid',
-        firebaseUid: 'uid',
         email: 'test@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -83,7 +81,6 @@ describe('UsersService', () => {
     it('should successfully apply a valid referral code', async () => {
       const user: User = {
         id: 'user1',
-        firebaseUid: 'user1',
         email: 'user1@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -94,7 +91,6 @@ describe('UsersService', () => {
 
       const referrer: User = {
         id: 'referrer1',
-        firebaseUid: 'referrer1',
         email: 'referrer@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -127,7 +123,6 @@ describe('UsersService', () => {
     it('should reject if user already has a referrer', async () => {
       const user: User = {
         id: 'user1',
-        firebaseUid: 'user1',
         email: 'user1@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -148,7 +143,6 @@ describe('UsersService', () => {
     it('should reject invalid referral code', async () => {
       const user: User = {
         id: 'user1',
-        firebaseUid: 'user1',
         email: 'user1@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -173,7 +167,6 @@ describe('UsersService', () => {
     it('should reject if user tries to use their own code', async () => {
       const user: User = {
         id: 'user1',
-        firebaseUid: 'user1',
         email: 'user1@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',
@@ -206,7 +199,6 @@ describe('UsersService', () => {
     it('should return referral stats for a user', async () => {
       const user: User = {
         id: 'user1',
-        firebaseUid: 'user1',
         email: 'user1@example.com',
         subscriptionTier: 'free',
         subscriptionStatus: 'active',

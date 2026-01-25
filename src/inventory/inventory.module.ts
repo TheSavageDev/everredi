@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
-import { firestoreProvider } from '../config/firebase.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
+import { TenantsModule } from '../tenants/tenants.module';
 
 @Module({
-  imports: [NotificationsModule, UsersModule],
+  imports: [NotificationsModule, UsersModule, TenantsModule],
   controllers: [InventoryController],
-  providers: [InventoryService, firestoreProvider],
+  providers: [InventoryService],
   exports: [InventoryService],
 })
 export class InventoryModule {}

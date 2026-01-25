@@ -8,12 +8,12 @@ import {
   Body,
   UseGuards,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LocationsService, Location } from './locations.service';
 
 @Controller('locations')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class LocationsController {
   constructor(private readonly locationsService: LocationsService) {}
 

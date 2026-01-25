@@ -156,7 +156,8 @@ export async function createTestingApp(
   const firebaseAuthGuardMock = {
     canActivate: jest.fn().mockImplementation(async (context) => {
       const request = context.switchToHttp().getRequest();
-      const authHeader = request.headers?.authorization || request.headers?.Authorization;
+      const authHeader =
+        request.headers?.authorization || request.headers?.Authorization;
 
       if (
         !authHeader ||
@@ -187,10 +188,15 @@ export async function createTestingApp(
   const premiumGuardMock = {
     canActivate: jest.fn().mockImplementation(async (context) => {
       const request = context.switchToHttp().getRequest();
-      
+
       // CRITICAL: Always set user if auth header exists
-      const authHeader = request.headers?.authorization || request.headers?.Authorization;
-      if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      const authHeader =
+        request.headers?.authorization || request.headers?.Authorization;
+      if (
+        authHeader &&
+        typeof authHeader === 'string' &&
+        authHeader.startsWith('Bearer ')
+      ) {
         request.user = {
           uid: TEST_USER_ID,
           email: TEST_USER_EMAIL,
@@ -208,7 +214,9 @@ export async function createTestingApp(
 
       // Check premium status for all routes (simplified - real guard checks @Premium() first)
       // This ensures all premium routes are protected in tests
-      const subscription = await usersServiceMock.getSubscriptionStatus?.(user.uid);
+      const subscription = await usersServiceMock.getSubscriptionStatus?.(
+        user.uid,
+      );
       if (!subscription?.isPremium) {
         throw new ForbiddenException({
           code: 'PREMIUM_REQUIRED',

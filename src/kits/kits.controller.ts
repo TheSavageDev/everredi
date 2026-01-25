@@ -10,7 +10,7 @@ import {
   UseGuards,
   Logger,
 } from '@nestjs/common';
-import { FirebaseAuthGuard } from '../common/guards/firebase-auth.guard';
+import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { KitTemplatesService, KitTemplate } from './kit-templates.service';
@@ -18,7 +18,7 @@ import { UserKitsService, UserKit } from './user-kits.service';
 import { PublicTemplatesService } from './public-templates.service';
 
 @Controller('kits')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class KitsController {
   private readonly logger = new Logger(KitsController.name);
 
@@ -35,6 +35,28 @@ export class KitsController {
       success: true,
       data: templates,
       message: 'Kit templates retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get(':id/items')
+  async getTemplateItems(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+    @Query('peopleCount') peopleCount?: string,
+  ) {
+    const selectedPeopleCount = peopleCount
+      ? parseInt(peopleCount, 10)
+      : undefined;
+    const items = await this.templatesService.getTemplateItems(
+      user.uid,
+      id,
+      selectedPeopleCount,
+    );
+    return {
+      success: true,
+      data: items,
+      message: 'Template items retrieved successfully',
       timestamp: new Date().toISOString(),
     };
   }
@@ -107,7 +129,7 @@ export class KitsController {
 }
 
 @Controller('user-kits')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class UserKitsController {
   private readonly logger = new Logger(UserKitsController.name);
 
@@ -180,14 +202,12 @@ export class UserKitsController {
             body.templateId,
             body.selectedPeopleCount,
           );
-        this.logger.log(
-          `Found ${templateItems.length} items in public template ${body.templateId}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
-        );
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
-        this.logger.warn(
+        this.logger.error(
           `Failed to get items from public template: ${errorMessage}`,
+          error instanceof Error ? error.stack : undefined,
         );
         templateItems = [];
       }
@@ -199,9 +219,6 @@ export class UserKitsController {
           body.templateId,
           body.selectedPeopleCount,
         );
-        this.logger.log(
-          `Found ${templateItems.length} items in user template ${body.templateId} for user ${user.uid}${body.selectedPeopleCount ? ` for ${body.selectedPeopleCount} people` : ''}`,
-        );
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
@@ -212,13 +229,6 @@ export class UserKitsController {
         );
         templateItems = [];
       }
-    }
-
-    // Warn if template has no items
-    if (!templateItems || templateItems.length === 0) {
-      this.logger.warn(
-        `Template ${body.templateId} has no items. Creating kit without items.`,
-      );
     }
 
     const kit = await this.userKitsService.createUserKitFromTemplate(
@@ -360,6 +370,24 @@ export class UserKitsController {
     };
   }
 
+  @Post(':id/items/bulk-update-to-required')
+  async bulkUpdateKitItemsToRequiredQuantity(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
+    const result =
+      await this.userKitsService.bulkUpdateKitItemsToRequiredQuantity(
+        user.uid,
+        id,
+      );
+    return {
+      success: true,
+      data: result,
+      message: `Updated ${result.updated} item${result.updated === 1 ? '' : 's'} to required quantity`,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Put(':id')
   async updateUserKit(
     @CurrentUser() user: { uid: string },
@@ -390,7 +418,7 @@ export class UserKitsController {
 }
 
 @Controller('public-templates')
-@UseGuards(FirebaseAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class PublicTemplatesController {
   constructor(
     private readonly publicTemplatesService: PublicTemplatesService,
@@ -409,6 +437,26 @@ export class PublicTemplatesController {
       success: true,
       data: templates,
       message: 'Public templates retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get(':id/items')
+  async getPublicTemplateItems(
+    @Param('id') id: string,
+    @Query('peopleCount') peopleCount?: string,
+  ) {
+    const selectedPeopleCount = peopleCount
+      ? parseInt(peopleCount, 10)
+      : undefined;
+    const items = await this.publicTemplatesService.getPublicTemplateItems(
+      id,
+      selectedPeopleCount,
+    );
+    return {
+      success: true,
+      data: items,
+      message: 'Public template items retrieved successfully',
       timestamp: new Date().toISOString(),
     };
   }

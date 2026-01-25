@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Timestamp } from 'firebase-admin/firestore';
-import { FirebaseService } from '../config/firebase.service';
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE } from '../config/supabase.provider';
 
 const logger = new Logger('DeviceTokensService');
 
@@ -15,7 +15,7 @@ export interface DeviceToken {
 
 @Injectable()
 export class DeviceTokensService {
-  constructor(private readonly firebaseService: FirebaseService) {}
+  constructor(@Inject(SUPABASE) private readonly supabase: SupabaseClient) {}
 
   /**
    * Register or update a device token for a user
@@ -27,45 +27,44 @@ export class DeviceTokensService {
   ): Promise<void> {
     try {
       // Check if token already exists for this user
-      const existing = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'deviceTokens',
-        {
-          where: [{ field: 'token', operator: '==', value: token }],
-          limit: 1,
-        },
-      );
+      const { data: existing } = await this.supabase
+        .from('device_tokens')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('token', token)
+        .single();
 
-      const now = Timestamp.now();
+      const now = new Date();
 
-      if (existing.length > 0) {
+      if (existing) {
         // Update existing token
-        await this.firebaseService.updateSubcollectionDocument(
-          'users',
-          userId,
-          'deviceTokens',
-          existing[0].id,
-          {
+        const { error } = await this.supabase
+          .from('device_tokens')
+          .update({
             platform,
-            updatedAt: now,
-          },
-        );
+            is_active: true,
+            updated_at: now.toISOString(),
+          })
+          .eq('id', existing.id);
+
+        if (error) {
+          throw new Error(`Failed to update device token: ${error.message}`);
+        }
         logger.log(`Updated device token for user ${userId}`);
       } else {
         // Create new token
-        await this.firebaseService.addSubcollectionDocument(
-          'users',
-          userId,
-          'deviceTokens',
-          {
-            token,
-            platform,
-            userId,
-            createdAt: now,
-            updatedAt: now,
-          },
-        );
+        const { error } = await this.supabase.from('device_tokens').insert({
+          user_id: userId,
+          token,
+          platform,
+          is_active: true,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+        });
+
+        if (error) {
+          throw new Error(`Failed to register device token: ${error.message}`);
+        }
         logger.log(`Registered new device token for user ${userId}`);
       }
     } catch (error) {
@@ -79,11 +78,24 @@ export class DeviceTokensService {
    */
   async getUserDeviceTokens(userId: string): Promise<DeviceToken[]> {
     try {
-      return this.firebaseService.getSubcollection<DeviceToken>(
-        'users',
-        userId,
-        'deviceTokens',
-      );
+      const { data, error } = await this.supabase
+        .from('device_tokens')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_active', true);
+
+      if (error) {
+        throw new Error(`Failed to get device tokens: ${error.message}`);
+      }
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        token: row.token,
+        platform: row.platform,
+        userId: row.user_id,
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+      }));
     } catch (error) {
       logger.error(`Error getting device tokens for user ${userId}:`, error);
       return [];
@@ -95,27 +107,15 @@ export class DeviceTokensService {
    */
   async removeDeviceToken(userId: string, token: string): Promise<void> {
     try {
-      const tokens = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'deviceTokens',
-        {
-          where: [{ field: 'token', operator: '==', value: token }],
-        },
-      );
+      const { error } = await this.supabase
+        .from('device_tokens')
+        .update({ is_active: false })
+        .eq('user_id', userId)
+        .eq('token', token);
 
-      const batch = this.firebaseService.createBatch();
-      for (const tokenDoc of tokens) {
-        const ref = this.firebaseService.getSubcollectionDocumentRef(
-          'users',
-          userId,
-          'deviceTokens',
-          tokenDoc.id,
-        );
-        batch.delete(ref);
+      if (error) {
+        throw new Error(`Failed to remove device token: ${error.message}`);
       }
-
-      await batch.commit();
       logger.log(`Removed device token for user ${userId}`);
     } catch (error) {
       logger.error(`Error removing device token for user ${userId}:`, error);
@@ -128,24 +128,14 @@ export class DeviceTokensService {
    */
   async removeAllUserTokens(userId: string): Promise<void> {
     try {
-      const tokens = await this.firebaseService.getSubcollection(
-        'users',
-        userId,
-        'deviceTokens',
-      );
+      const { error } = await this.supabase
+        .from('device_tokens')
+        .update({ is_active: false })
+        .eq('user_id', userId);
 
-      const batch = this.firebaseService.createBatch();
-      for (const tokenDoc of tokens) {
-        const ref = this.firebaseService.getSubcollectionDocumentRef(
-          'users',
-          userId,
-          'deviceTokens',
-          tokenDoc.id,
-        );
-        batch.delete(ref);
+      if (error) {
+        throw new Error(`Failed to remove all device tokens: ${error.message}`);
       }
-
-      await batch.commit();
       logger.log(`Removed all device tokens for user ${userId}`);
     } catch (error) {
       logger.error(

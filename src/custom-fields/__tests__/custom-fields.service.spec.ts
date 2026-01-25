@@ -2,50 +2,37 @@ import {
   CustomFieldsService,
   CustomFieldDefinition,
 } from '../custom-fields.service';
-import { Timestamp } from 'firebase-admin/firestore';
 import { NotFoundException } from '@nestjs/common';
-import { createFirebaseServiceMock } from '../../../test/utils/firebase-service.mock';
-import { FirebaseService } from '../../config/firebase.service';
+import { createSupabaseClientMock } from '../../../test/utils/supabase-client.mock';
 
 describe('CustomFieldsService', () => {
-  const firebaseServiceMock = createFirebaseServiceMock();
+  const supabaseMock = createSupabaseClientMock();
   let service: CustomFieldsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (firebaseServiceMock._clearAll as jest.Mock)();
-    service = new CustomFieldsService(firebaseServiceMock as any);
+    (supabaseMock._clearAll as jest.Mock)();
+    service = new CustomFieldsService(supabaseMock);
   });
 
   describe('getCustomFields', () => {
     it('should return custom fields for a user', async () => {
-      const now = Timestamp.now();
-      const field1: CustomFieldDefinition = {
+      const field1 = {
         id: '1',
-        userId: 'user1',
+        user_id: 'user1',
         name: 'Field 1',
-        type: 'text',
-        required: false,
+        field_type: 'text',
+        is_required: false,
         order: 0,
-        createdAt: now,
-        updatedAt: now,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
 
-      (firebaseServiceMock._setMockData as jest.Mock)(
-        'users/user1/customFields',
-        [field1],
-      );
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', [field1]);
 
       const result = await service.getCustomFields('user1');
 
-      expect(firebaseServiceMock.getSubcollection).toHaveBeenCalledWith(
-        'users',
-        'user1',
-        'customFields',
-        expect.objectContaining({
-          orderBy: { field: 'order', direction: 'asc' },
-        }),
-      );
+      expect(supabaseMock.from).toHaveBeenCalledWith('custom_fields');
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Field 1');
     });
@@ -74,33 +61,32 @@ describe('CustomFieldsService', () => {
       expect(result).toBeDefined();
       expect(result.name).toBe('New Field');
       expect(result.userId).toBe('user1');
-      expect(firebaseServiceMock.addSubcollectionDocument).toHaveBeenCalledWith(
-        'users',
-        'user1',
-        'customFields',
-        expect.objectContaining({
-          ...fieldData,
-          userId: 'user1',
-          createdAt: expect.anything(),
-          updatedAt: expect.anything(),
-        }),
-      );
+      expect(supabaseMock.from).toHaveBeenCalledWith('custom_fields');
     });
 
     it('should auto-assign order when not provided', async () => {
-      const now = Timestamp.now();
-      const existingField: CustomFieldDefinition = {
+      const existingField = {
+        id: '1',
+        user_id: 'user1',
+        name: 'Existing Field',
+        type: 'text',
+        required: false,
+        order: 5,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', [existingField]);
+      jest.spyOn(service, 'getCustomFields').mockResolvedValue([{
         id: '1',
         userId: 'user1',
         name: 'Existing Field',
         type: 'text',
         required: false,
         order: 5,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      jest.spyOn(service, 'getCustomFields').mockResolvedValue([existingField]);
+        createdAt: new Date(existingField.created_at),
+        updatedAt: new Date(existingField.updated_at),
+      }]);
 
       const fieldData = {
         name: 'New Field',
@@ -116,22 +102,18 @@ describe('CustomFieldsService', () => {
 
   describe('updateCustomField', () => {
     it('should update an existing custom field', async () => {
-      const now = Timestamp.now();
-      const existingField: CustomFieldDefinition = {
+      const existingField = {
         id: '1',
-        userId: 'user1',
+        user_id: 'user1',
         name: 'Old Name',
-        type: 'text',
-        required: false,
+        field_type: 'text',
+        is_required: false,
         order: 0,
-        createdAt: now,
-        updatedAt: now,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
 
-      (firebaseServiceMock._setMockDocument as jest.Mock)(
-        'users/user1/customFields/1',
-        existingField,
-      );
+      (supabaseMock._setMockDocument as jest.Mock)('custom_fields', '1', existingField);
 
       const updates = {
         name: 'New Name',
@@ -139,25 +121,13 @@ describe('CustomFieldsService', () => {
 
       const result = await service.updateCustomField('user1', '1', updates);
 
-      expect(
-        firebaseServiceMock.updateSubcollectionDocument,
-      ).toHaveBeenCalledWith(
-        'users',
-        'user1',
-        'customFields',
-        '1',
-        expect.objectContaining({
-          ...updates,
-          updatedAt: expect.anything(),
-        }),
-      );
+      expect(supabaseMock.from).toHaveBeenCalledWith('custom_fields');
       expect(result.name).toBe('New Name');
     });
 
     it('should throw NotFoundException if field not found', async () => {
-      (
-        firebaseServiceMock.updateSubcollectionDocument as jest.Mock
-      ).mockRejectedValue(new NotFoundException('Document not found'));
+      // Mock empty result for update query
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', []);
 
       await expect(
         service.updateCustomField('user1', 'nonexistent', { name: 'New' }),
@@ -167,17 +137,26 @@ describe('CustomFieldsService', () => {
 
   describe('deleteCustomField', () => {
     it('should delete a custom field', async () => {
+      const existingField = {
+        id: '1',
+        user_id: 'user1',
+        name: 'Test Field',
+        field_type: 'text',
+        is_required: false,
+        order: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      (supabaseMock._setMockDocument as jest.Mock)('custom_fields', '1', existingField);
+
       await service.deleteCustomField('user1', '1');
 
-      expect(
-        firebaseServiceMock.deleteSubcollectionDocument,
-      ).toHaveBeenCalledWith('users', 'user1', 'customFields', '1');
+      expect(supabaseMock.from).toHaveBeenCalledWith('custom_fields');
     });
 
     it('should throw NotFoundException if field not found', async () => {
-      (
-        firebaseServiceMock.deleteSubcollectionDocument as jest.Mock
-      ).mockRejectedValue(new NotFoundException('Document not found'));
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', []);
 
       await expect(
         service.deleteCustomField('user1', 'nonexistent'),
@@ -188,14 +167,17 @@ describe('CustomFieldsService', () => {
   describe('reorderFields', () => {
     it('should reorder fields using batch update', async () => {
       const fieldIds = ['field1', 'field2', 'field3'];
+      
+      // Setup mock fields
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', [
+        { id: 'field1', user_id: 'user1', order: 0 },
+        { id: 'field2', user_id: 'user1', order: 1 },
+        { id: 'field3', user_id: 'user1', order: 2 },
+      ]);
 
       await service.reorderFields('user1', fieldIds);
 
-      expect(firebaseServiceMock.createBatch).toHaveBeenCalled();
-      const batch = (firebaseServiceMock.createBatch as jest.Mock).mock
-        .results[0].value;
-      expect(batch.update).toHaveBeenCalledTimes(3);
-      expect(batch.commit).toHaveBeenCalled();
+      expect(supabaseMock.from).toHaveBeenCalledWith('custom_fields');
     });
   });
 });

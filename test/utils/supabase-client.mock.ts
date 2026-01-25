@@ -18,13 +18,7 @@ export function createSupabaseClientMock(): SupabaseClient {
     mockData.set(table, data);
   };
 
-  // Helper to get a single document
-  const getDocument = (table: string, id: string): any | null => {
-    const key = `${table}:${id}`;
-    return mockDocuments.get(key) || null;
-  };
-
-  // Execute query helper
+    // Execute query helper
   const executeQuery = (
     table: string,
     filters: Array<{ field: string; operator: string; value: any }>,
@@ -32,6 +26,8 @@ export function createSupabaseClientMock(): SupabaseClient {
     limitCount: number | null,
     singleMode: boolean,
     selectFields: string[] | null,
+    countOptions?: { count?: 'exact' | 'estimated' | 'planned'; head?: boolean },
+    state?: any,
   ) => {
     let result = [...getTableData(table)];
 
@@ -58,6 +54,11 @@ export function createSupabaseClientMock(): SupabaseClient {
             return true;
         }
       });
+    }
+
+    // Handle count query
+    if (countOptions?.count && countOptions?.head) {
+      return { data: null, error: null, count: result.length };
     }
 
     // Apply ordering
@@ -95,7 +96,14 @@ export function createSupabaseClientMock(): SupabaseClient {
     // Handle single mode
     if (singleMode) {
       if (result.length === 0) {
-        return { data: null, error: { code: 'PGRST116', message: 'No rows returned' } };
+        // maybeSingle returns null on no results, single throws error
+        if (state?.maybeSingleMode) {
+          return { data: null, error: null };
+        }
+        const error: any = new Error('No rows returned');
+        error.code = 'PGRST116';
+        error.message = 'No rows returned';
+        return { data: null, error };
       }
       result = result[0];
     }
@@ -110,72 +118,93 @@ export function createSupabaseClientMock(): SupabaseClient {
       orderBy: null as { field: string; ascending: boolean } | null,
       limitCount: null as number | null,
       singleMode: false,
+      maybeSingleMode: false,
       selectFields: null as string[] | null,
     };
 
-    const builder = {
-      select: jest.fn((fields?: string) => {
-        state.selectFields = fields ? (Array.isArray(fields) ? fields : [fields]) : null;
-        return builder;
-      }),
+    // Create builder methods that return the builder for chaining
+    // Use regular functions (not jest.fn) for chainable methods to ensure they return the builder correctly
+    const builder: any = {};
+    
+    builder.select = (fields?: string | string[], options?: { count?: 'exact' | 'estimated' | 'planned'; head?: boolean }) => {
+      state.selectFields = fields ? (Array.isArray(fields) ? fields : [fields]) : null;
+      // Store count options for later use
+      (state as any).countOptions = options;
+      return builder;
+    };
+    // Wrap in jest.fn for spy capabilities
+    builder.select = jest.fn(builder.select);
 
-      eq: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'eq', value });
-        return builder;
-      }),
+    builder.eq = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'eq', value });
+      return builder;
+    };
+    builder.eq = jest.fn(builder.eq);
 
-      neq: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'neq', value });
-        return builder;
-      }),
+    builder.limit = (count: number) => {
+      state.limitCount = count;
+      return builder;
+    };
+    builder.limit = jest.fn(builder.limit);
 
-      gt: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'gt', value });
-        return builder;
-      }),
+    builder.neq = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'neq', value });
+      return builder;
+    };
+    builder.neq = jest.fn(builder.neq);
 
-      gte: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'gte', value });
-        return builder;
-      }),
+    builder.gt = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'gt', value });
+      return builder;
+    };
+    builder.gt = jest.fn(builder.gt);
 
-      lt: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'lt', value });
-        return builder;
-      }),
+    builder.gte = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'gte', value });
+      return builder;
+    };
+    builder.gte = jest.fn(builder.gte);
 
-      lte: jest.fn((field: string, value: any) => {
-        state.filters.push({ field, operator: 'lte', value });
-        return builder;
-      }),
+    builder.lt = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'lt', value });
+      return builder;
+    };
+    builder.lt = jest.fn(builder.lt);
 
-      in: jest.fn((field: string, values: any[]) => {
-        state.filters.push({ field, operator: 'in', value: values });
-        return builder;
-      }),
+    builder.lte = (field: string, value: any) => {
+      state.filters.push({ field, operator: 'lte', value });
+      return builder;
+    };
+    builder.lte = jest.fn(builder.lte);
 
-      order: jest.fn((field: string, options?: { ascending?: boolean } | string) => {
-        const ascending = typeof options === 'object' ? (options?.ascending !== false) : options !== 'desc';
-        state.orderBy = { field, ascending };
-        return builder;
-      }),
+    builder.in = (field: string, values: any[]) => {
+      state.filters.push({ field, operator: 'in', value: values });
+      return builder;
+    };
+    builder.in = jest.fn(builder.in);
 
-      limit: jest.fn((count: number) => {
-        state.limitCount = count;
-        return builder;
-      }),
+    builder.order = (field: string, options?: { ascending?: boolean } | string) => {
+      const ascending = typeof options === 'object' ? (options?.ascending !== false) : options !== 'desc';
+      state.orderBy = { field, ascending };
+      return builder;
+    };
+    builder.order = jest.fn(builder.order);
 
-      single: jest.fn(() => {
-        state.singleMode = true;
-        return builder;
-      }),
+    builder.single = () => {
+      state.singleMode = true;
+      return builder;
+    };
+    builder.single = jest.fn(builder.single);
 
-      maybeSingle: jest.fn(() => {
-        state.singleMode = true;
-        return builder;
-      }),
+    builder.maybeSingle = () => {
+      // maybeSingle doesn't throw error on no results, just returns null
+      state.maybeSingleMode = true;
+      state.singleMode = true;
+      return builder;
+    };
+    builder.maybeSingle = jest.fn(builder.maybeSingle);
 
-      insert: jest.fn((values: any) => {
+    builder.insert = jest.fn((values: any) => {
         const insertData = Array.isArray(values) ? values : [values];
         const newRows = insertData.map((row: any) => {
           const id = row.id || `id-${Date.now()}-${Math.random()}`;
@@ -190,128 +219,260 @@ export function createSupabaseClientMock(): SupabaseClient {
         });
         const existing = getTableData(table);
         setTableData(table, [...existing, ...newRows]);
-        return Promise.resolve({ data: Array.isArray(values) ? newRows : newRows[0], error: null });
-      }),
-
-      update: jest.fn((values: any) => {
-        // Apply filters to find matching rows
-        let matchingRows = getTableData(table);
         
-        for (const filter of state.filters) {
-          matchingRows = matchingRows.filter((row: any) => {
-            const rowValue = row[filter.field];
-            switch (filter.operator) {
-              case 'eq':
-                return rowValue === filter.value;
-              case 'neq':
-                return rowValue !== filter.value;
-              case 'gt':
-                return rowValue > filter.value;
-              case 'gte':
-                return rowValue >= filter.value;
-              case 'lt':
-                return rowValue < filter.value;
-              case 'lte':
-                return rowValue <= filter.value;
-              case 'in':
-                return Array.isArray(filter.value) && filter.value.includes(rowValue);
-              default:
-                return true;
-            }
-          });
-        }
-
-        // Update matching rows
-        const updatedRows = matchingRows.map((row: any) => {
-          const updated = {
-            ...row,
-            ...values,
-            updated_at: new Date().toISOString(),
-          };
-          mockDocuments.set(`${table}:${row.id}`, updated);
-          return updated;
-        });
-
-        // Update in table data
-        const allData = getTableData(table);
-        const updatedData = allData.map((row: any) => {
-          const updated = updatedRows.find((ur: any) => ur.id === row.id);
-          return updated || row;
-        });
-        setTableData(table, updatedData);
-
-        return Promise.resolve({ 
-          data: state.singleMode ? (updatedRows[0] || null) : updatedRows, 
-          error: null 
-        });
-      }),
-
-      delete: jest.fn(() => {
-        // Apply filters to find matching rows
-        let matchingRows = getTableData(table);
+        // If insert is called without .select(), return a simple promise
+        // This handles cases like location.insert() without select
+        const simpleInsertPromise = Promise.resolve({ data: newRows, error: null });
         
-        for (const filter of state.filters) {
-          matchingRows = matchingRows.filter((row: any) => {
-            const rowValue = row[filter.field];
-            switch (filter.operator) {
-              case 'eq':
-                return rowValue === filter.value;
-              case 'neq':
-                return rowValue !== filter.value;
-              case 'gt':
-                return rowValue > filter.value;
-              case 'gte':
-                return rowValue >= filter.value;
-              case 'lt':
-                return rowValue < filter.value;
-              case 'lte':
-                return rowValue <= filter.value;
-              case 'in':
-                return Array.isArray(filter.value) && filter.value.includes(rowValue);
-              default:
-                return true;
+        // Create a new state for the insert builder
+        const insertState = {
+          singleMode: false,
+          selectFields: null as string[] | null,
+        };
+        
+        // Return a builder that supports .select().single() chain
+        const insertBuilder: any = {
+          select: jest.fn((fields?: string | string[]) => {
+            insertState.selectFields = fields ? (Array.isArray(fields) ? fields : [fields]) : null;
+            return insertBuilder;
+          }),
+          single: jest.fn(() => {
+            insertState.singleMode = true;
+            return insertBuilder;
+          }),
+          then: jest.fn((onResolve?: (value: any) => any, onReject?: (error: any) => any) => {
+            // If single mode, return first row, otherwise return array
+            let result: any;
+            if (insertState.singleMode) {
+              result = newRows[0];
+            } else {
+              result = Array.isArray(values) ? newRows : newRows[0];
             }
-          });
-        }
-
-        // Delete matching rows
-        const allData = getTableData(table);
-        const remainingData = allData.filter((row: any) => !matchingRows.some((mr: any) => mr.id === row.id));
-        setTableData(table, remainingData);
-
-        // Remove from documents
-        matchingRows.forEach((row: any) => {
-          mockDocuments.delete(`${table}:${row.id}`);
-        });
-
-        return Promise.resolve({ data: null, error: null });
-      }),
-    };
-
-    // Create a promise that executes the query when awaited
-    const createPromise = (): Promise<{ data: any; error: any }> => {
-      return new Promise((resolve, reject) => {
-        const result = executeQuery(
-          table,
-          state.filters,
-          state.orderBy,
-          state.limitCount,
-          state.singleMode,
-          state.selectFields,
-        );
-        if (result.error) {
-          reject(result.error);
-        } else {
-          resolve(result);
-        }
+            
+            // Apply select fields if specified
+            if (insertState.selectFields && result) {
+              if (Array.isArray(result)) {
+                result = result.map((row: any) => {
+                  const selected: any = {};
+                  insertState.selectFields!.forEach((field: string) => {
+                    if (field === '*') {
+                      Object.assign(selected, row);
+                    } else {
+                      selected[field] = row[field];
+                    }
+                  });
+                  return selected;
+                });
+              } else {
+                const selected: any = {};
+                insertState.selectFields.forEach((field: string) => {
+                  if (field === '*') {
+                    Object.assign(selected, result);
+                  } else {
+                    selected[field] = result[field];
+                  }
+                });
+                result = selected;
+              }
+            }
+            
+            const response = { data: result, error: null };
+            return Promise.resolve(response).then(onResolve, onReject);
+          }),
+          catch: jest.fn((onReject?: (error: any) => any) => {
+            return Promise.resolve({ data: null, error: null }).catch(onReject);
+          }),
+          finally: jest.fn((onFinally?: () => any) => {
+            return Promise.resolve({ data: null, error: null }).finally(onFinally);
+          }),
+          [Symbol.toStringTag]: 'Promise',
+        };
+        
+        // Make insertBuilder also a promise so it can be awaited directly
+        // This handles cases like: await supabase.from('table').insert({...})
+        Object.setPrototypeOf(insertBuilder, Promise.prototype);
+        Object.assign(insertBuilder, simpleInsertPromise);
+        
+        return insertBuilder;
       });
+
+    builder.update = jest.fn((values: any) => {
+        // Return a builder that supports .eq() chain after update
+        const updateBuilder: any = {
+          eq: jest.fn((field: string, value: any) => {
+            state.filters.push({ field, operator: 'eq', value });
+            return updateBuilder;
+          }),
+          select: jest.fn((fields?: string | string[]) => {
+            state.selectFields = fields ? (Array.isArray(fields) ? fields : [fields]) : null;
+            return updateBuilder;
+          }),
+          single: jest.fn(() => {
+            state.singleMode = true;
+            return updateBuilder;
+          }),
+          limit: jest.fn((count: number) => {
+            state.limitCount = count;
+            return updateBuilder;
+          }),
+          then: jest.fn((onResolve?: (value: any) => any) => {
+            // Apply filters to find matching rows
+            let matchingRows = getTableData(table);
+            
+            for (const filter of state.filters) {
+              matchingRows = matchingRows.filter((row: any) => {
+                const rowValue = row[filter.field];
+                switch (filter.operator) {
+                  case 'eq':
+                    return rowValue === filter.value;
+                  case 'neq':
+                    return rowValue !== filter.value;
+                  case 'gt':
+                    return rowValue > filter.value;
+                  case 'gte':
+                    return rowValue >= filter.value;
+                  case 'lt':
+                    return rowValue < filter.value;
+                  case 'lte':
+                    return rowValue <= filter.value;
+                  case 'in':
+                    return Array.isArray(filter.value) && filter.value.includes(rowValue);
+                  default:
+                    return true;
+                }
+              });
+            }
+
+            // Update matching rows
+            const updatedRows = matchingRows.map((row: any) => {
+              const updated = {
+                ...row,
+                ...values,
+                updated_at: new Date().toISOString(),
+              };
+              mockDocuments.set(`${table}:${row.id}`, updated);
+              return updated;
+            });
+
+            // Update in table data
+            const allData = getTableData(table);
+            const updatedData = allData.map((row: any) => {
+              const updated = updatedRows.find((ur: any) => ur.id === row.id);
+              return updated || row;
+            });
+            setTableData(table, updatedData);
+
+            const result = state.singleMode ? (updatedRows[0] || null) : updatedRows;
+            const response = { data: result, error: null };
+            return Promise.resolve(response).then(onResolve);
+          }),
+          catch: jest.fn((onReject?: (error: any) => any) => {
+            return Promise.resolve({ data: null, error: null }).catch(onReject);
+          }),
+          [Symbol.toStringTag]: 'Promise',
+        };
+        return updateBuilder as any;
+      });
+
+    builder.delete = jest.fn(() => {
+        // Return a builder that supports .eq() chain after delete
+        const deleteBuilder: any = {
+          eq: jest.fn((field: string, value: any) => {
+            state.filters.push({ field, operator: 'eq', value });
+            return deleteBuilder;
+          }),
+          limit: jest.fn((count: number) => {
+            state.limitCount = count;
+            return deleteBuilder;
+          }),
+          then: jest.fn((onResolve?: (value: any) => any) => {
+            // Apply filters to find matching rows
+            let matchingRows = getTableData(table);
+            
+            for (const filter of state.filters) {
+              matchingRows = matchingRows.filter((row: any) => {
+                const rowValue = row[filter.field];
+                switch (filter.operator) {
+                  case 'eq':
+                    return rowValue === filter.value;
+                  case 'neq':
+                    return rowValue !== filter.value;
+                  case 'gt':
+                    return rowValue > filter.value;
+                  case 'gte':
+                    return rowValue >= filter.value;
+                  case 'lt':
+                    return rowValue < filter.value;
+                  case 'lte':
+                    return rowValue <= filter.value;
+                  case 'in':
+                    return Array.isArray(filter.value) && filter.value.includes(rowValue);
+                  default:
+                    return true;
+                }
+              });
+            }
+
+            // Delete matching rows
+            const allData = getTableData(table);
+            const remainingData = allData.filter((row: any) => !matchingRows.some((mr: any) => mr.id === row.id));
+            setTableData(table, remainingData);
+
+            // Remove from documents
+            matchingRows.forEach((row: any) => {
+              mockDocuments.delete(`${table}:${row.id}`);
+            });
+
+            const response = { data: null, error: matchingRows.length === 0 ? { code: 'PGRST116' } : null };
+            return Promise.resolve(response).then(onResolve);
+          }),
+          catch: jest.fn((onReject?: (error: any) => any) => {
+            return Promise.resolve({ data: null, error: null }).catch(onReject);
+          }),
+          [Symbol.toStringTag]: 'Promise',
+        };
+        return deleteBuilder as any;
+      });
+
+    // Make the builder thenable (Promise-like) by implementing then/catch
+    // The promise is created lazily when then/catch is called
+    const execute = () => {
+      return executeQuery(
+        table,
+        state.filters,
+        state.orderBy,
+        state.limitCount,
+        state.singleMode,
+        state.selectFields,
+        (state as any).countOptions,
+        state,
+      );
     };
 
-    // Make the builder thenable (Promise-like)
-    const promise = createPromise();
-    const thenable = Object.assign(builder, promise);
+    // Add promise methods to builder - these will be called when the query is awaited
+    // Supabase queries always resolve with { data, error }, they never reject
+    // Assign directly to preserve all other methods like limit, eq, etc.
+    builder.then = jest.fn((onResolve?: (value: any) => any, onReject?: (error: any) => any) => {
+      const result = execute();
+      // Always resolve, never reject - Supabase returns errors in the response object
+      return Promise.resolve(result).then(onResolve, onReject);
+    });
     
-    return thenable as any;
+    builder.catch = jest.fn((onReject?: (error: any) => any) => {
+      const result = execute();
+      // Always resolve, never reject
+      return Promise.resolve(result).catch(onReject);
+    });
+    
+    builder.finally = jest.fn((onFinally?: () => any) => {
+      const result = execute();
+      // Always resolve, never reject
+      return Promise.resolve(result).finally(onFinally);
+    });
+    
+    (builder as any)[Symbol.toStringTag] = 'Promise';
+    
+    return builder;
   };
 
   const mockClient = {

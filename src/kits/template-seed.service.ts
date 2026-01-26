@@ -37,7 +37,10 @@ export class TemplateSeedService {
       environment: 'indoor',
       skillLevel: 'beginner',
       items: [
-        { supplyName: 'Adhesive Bandages - Assorted Sizes', requiredQuantity: 20 },
+        {
+          supplyName: 'Adhesive Bandages - Assorted Sizes',
+          requiredQuantity: 20,
+        },
         { supplyName: 'Gauze Pads', requiredQuantity: 10 },
         { supplyName: 'Sterile Gauze Pads 4x4', requiredQuantity: 5 },
         { supplyName: 'Medical Tape', requiredQuantity: 1 },
@@ -129,7 +132,10 @@ export class TemplateSeedService {
       environment: 'indoor',
       skillLevel: 'beginner',
       items: [
-        { supplyName: 'Adhesive Bandages - Assorted Sizes', requiredQuantity: 100 },
+        {
+          supplyName: 'Adhesive Bandages - Assorted Sizes',
+          requiredQuantity: 100,
+        },
         { supplyName: 'Gauze Pads', requiredQuantity: 40 },
         { supplyName: 'Sterile Gauze Pads 4x4', requiredQuantity: 20 },
         { supplyName: 'Medical Tape', requiredQuantity: 4 },
@@ -263,7 +269,10 @@ export class TemplateSeedService {
       environment: 'travel',
       skillLevel: 'beginner',
       items: [
-        { supplyName: 'Adhesive Bandages - Assorted Sizes', requiredQuantity: 15 },
+        {
+          supplyName: 'Adhesive Bandages - Assorted Sizes',
+          requiredQuantity: 15,
+        },
         { supplyName: 'Sterile Gauze Pads 4x4', requiredQuantity: 5 },
         { supplyName: 'Medical Tape', requiredQuantity: 1 },
         { supplyName: 'Antiseptic Wipes', requiredQuantity: 10 },
@@ -461,7 +470,10 @@ export class TemplateSeedService {
       nameLower.includes('aloe')
     ) {
       return (
-        categoryMap.get('burn care') || { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('burn care') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -470,8 +482,10 @@ export class TemplateSeedService {
       nameLower.includes('heat')
     ) {
       return (
-        categoryMap.get('cold & heat therapy') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('cold & heat therapy') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -481,8 +495,10 @@ export class TemplateSeedService {
       nameLower.includes('eye wash')
     ) {
       return (
-        categoryMap.get('hygiene & sanitation') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('hygiene & sanitation') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -493,8 +509,10 @@ export class TemplateSeedService {
       nameLower.includes('cpr')
     ) {
       return (
-        categoryMap.get('personal protection') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('personal protection') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -504,8 +522,10 @@ export class TemplateSeedService {
       nameLower.includes('splint')
     ) {
       return (
-        categoryMap.get('emergency & trauma') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('emergency & trauma') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -515,8 +535,10 @@ export class TemplateSeedService {
       nameLower.includes('flashlight')
     ) {
       return (
-        categoryMap.get('tools & instruments') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('tools & instruments') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -530,8 +552,10 @@ export class TemplateSeedService {
       nameLower.includes('peroxide')
     ) {
       return (
-        categoryMap.get('medications & ointments') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('medications & ointments') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
     if (
@@ -543,8 +567,10 @@ export class TemplateSeedService {
       nameLower.includes('elastic')
     ) {
       return (
-        categoryMap.get('bandages & wound care') ||
-        { id: categories[0].id, name: categories[0].name }
+        categoryMap.get('bandages & wound care') || {
+          id: categories[0].id,
+          name: categories[0].name,
+        }
       );
     }
 
@@ -554,7 +580,11 @@ export class TemplateSeedService {
 
   private async addItemsToPublicTemplate(
     publicTemplateId: string,
-    items: Array<{ supplyName: string; requiredQuantity: number; notes?: string }>,
+    items: Array<{
+      supplyName: string;
+      requiredQuantity: number;
+      notes?: string;
+    }>,
   ): Promise<void> {
     this.logger.log(
       `  Template document ${publicTemplateId} exists, adding ${items.length} items...`,
@@ -583,11 +613,16 @@ export class TemplateSeedService {
       );
     }
 
-    this.logger.log(`  Created revision ${revision.id} (version 1) for template ${publicTemplateId}`);
+    this.logger.log(
+      `  Created revision ${revision.id} (version 1) for template ${publicTemplateId}`,
+    );
 
     // Get all supplies and categories
     // System user should see all supplies (premium access)
-    const allSupplies = await this.suppliesService.getSupplies(SYSTEM_USER_ID, true);
+    const allSupplies = await this.suppliesService.getSupplies(
+      SYSTEM_USER_ID,
+      true,
+    );
     const allCategories = await this.supplyCategoriesService.getCategories();
     const supplyMap = new Map<string, string>();
     allSupplies.forEach((supply) => {
@@ -601,8 +636,11 @@ export class TemplateSeedService {
 
         // If supply doesn't exist, create it
         if (!supplyId) {
-          const category = this.findCategoryForSupply(item.supplyName, allCategories);
-          
+          const category = this.findCategoryForSupply(
+            item.supplyName,
+            allCategories,
+          );
+
           this.logger.log(
             `    Creating supply "${item.supplyName}" in category "${category.name}"`,
           );
@@ -673,7 +711,9 @@ export class TemplateSeedService {
       }),
     );
 
-    this.logger.log(`  Inserting ${revisionItems.length} items into revision...`);
+    this.logger.log(
+      `  Inserting ${revisionItems.length} items into revision...`,
+    );
     const { error } = await this.supabase
       .from('kit_template_revision_items')
       .insert(revisionItems);

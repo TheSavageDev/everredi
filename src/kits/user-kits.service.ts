@@ -11,7 +11,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
-import { InventoryService } from '../inventory/inventory.service';
+import {
+  InventoryService,
+  type InventoryItem,
+} from '../inventory/inventory.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { ComplianceService } from '../compliance/compliance.service';
 
@@ -91,13 +94,17 @@ function rowToUserKit(row: any): UserKit {
 // Helper function to convert PostgreSQL row to KitItemInstance
 // Works with consolidated inventory_items table
 function rowToKitItem(row: any, actualQuantity?: number): KitItemInstance {
-  // For inventory_items, quantity is the required quantity for requirements
-  // actualQuantity should be calculated from inventory_lots or passed in
-  const reqQty = row.is_requirement
-    ? row.quantity || 0
-    : row.required_quantity || row.quantity || 0;
+  // Read required_quantity and actual_quantity directly from database columns
+  const reqQty =
+    row.required_quantity !== undefined && row.required_quantity !== null
+      ? row.required_quantity
+      : 0;
   const actQty =
-    actualQuantity !== undefined ? actualQuantity : row.actual_quantity || 0;
+    actualQuantity !== undefined
+      ? actualQuantity
+      : row.actual_quantity !== undefined && row.actual_quantity !== null
+        ? row.actual_quantity
+        : 0;
 
   // Calculate status if not provided
   let status: 'missing' | 'partial' | 'complete';
@@ -124,6 +131,76 @@ function rowToKitItem(row: any, actualQuantity?: number): KitItemInstance {
     actualQuantity: actQty,
     status,
     notes: row.notes,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+// Helper function to convert PostgreSQL row to InventoryItem (for kit items)
+// Includes kit-specific fields: requiredQuantity and actualQuantity
+// Reads directly from database columns (no calculation needed)
+function rowToInventoryItemForKit(row: any): InventoryItem {
+  // Read actual_quantity and required_quantity directly from database columns
+  const actQty =
+    row.actual_quantity !== undefined && row.actual_quantity !== null
+      ? row.actual_quantity
+      : row.is_requirement
+        ? 0
+        : 0;
+
+  // Read required_quantity from database column
+  const reqQty =
+    row.required_quantity !== undefined && row.required_quantity !== null
+      ? row.required_quantity
+      : undefined;
+
+  // Calculate status for kit items
+  let status: 'missing' | 'partial' | 'complete';
+  if (row.status && ['missing', 'partial', 'complete'].includes(row.status)) {
+    status = row.status as 'missing' | 'partial' | 'complete';
+  } else {
+    // For kit items, calculate status based on actual vs required
+    if (actQty >= reqQty) {
+      status = 'complete';
+    } else if (actQty > 0) {
+      status = 'partial';
+    } else {
+      status = 'missing';
+    }
+  }
+
+  // Read expiration date directly from row (no lots aggregation)
+  const expirationDate = row.expiration_date
+    ? new Date(row.expiration_date)
+    : undefined;
+
+  // Read purchase info directly from row (no lots aggregation)
+  const purchaseDate = row.purchase_date
+    ? new Date(row.purchase_date)
+    : undefined;
+  const purchasePrice = row.purchase_price;
+  const supplier = row.supplier;
+
+  return {
+    id: row.id,
+    userId: row.user_id || '',
+    supplyId: row.supply_id,
+    supplyName: row.supply_name || row.freeform_name || '',
+    supplyCategoryId: row.supply_category_id,
+    locationId: row.location_id || '',
+    locationName: row.location_name,
+    kitId: row.kit_id,
+    kitName: row.kit_name,
+    // Use actual_quantity and required_quantity directly (no quantity field)
+    actualQuantity: actQty, // Read from database column
+    requiredQuantity: reqQty, // Read from database column
+    lotCode: row.lot_code, // Lot/batch identifier
+    expirationDate,
+    purchaseDate,
+    purchasePrice,
+    supplier,
+    notes: row.notes,
+    status: status,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -161,15 +238,17 @@ export class UserKitsService {
     }
 
     // Map kits to UserKit format
-    return (kitsData || []).map((kit: any) => rowToUserKit({
-      ...kit,
-      user_id: userId,
-      kit_template_id: (kit.metadata as any)?.kit_template_id,
-      kit_template_name: (kit.metadata as any)?.kit_template_name,
-      location_name: Array.isArray(kit.locations)
-        ? kit.locations[0]?.name
-        : (kit.locations as any)?.name,
-    }));
+    return (kitsData || []).map((kit: any) =>
+      rowToUserKit({
+        ...kit,
+        user_id: userId,
+        kit_template_id: (kit.metadata as any)?.kit_template_id,
+        kit_template_name: (kit.metadata as any)?.kit_template_name,
+        location_name: Array.isArray(kit.locations)
+          ? kit.locations[0]?.name
+          : (kit.locations as any)?.name,
+      }),
+    );
   }
 
   async getUserKit(userId: string, kitId: string): Promise<UserKit> {
@@ -252,8 +331,7 @@ export class UserKitsService {
         .from('kits')
         .select('*', { count: 'exact', head: true })
         .eq('tenant_id', tenant.id)
-        .is('deleted_at', null)
-        .in('status', ['active']);
+        .is('deleted_at', null);
 
       if (countError) {
         this.logger.error(`Error counting kits: ${countError.message}`);
@@ -357,7 +435,7 @@ export class UserKitsService {
     templateItems?: Array<{
       supplyId: string;
       supplyName?: string;
-      quantity: number;
+      requiredQuantity: number;
       notes?: string;
     }>,
   ): Promise<UserKit> {
@@ -382,18 +460,20 @@ export class UserKitsService {
         'osha-warehouse': 'warehouse',
         'osha-manufacturing': 'manufacturing',
       };
-      oshaKitType = purposeMap[template.purpose] || template.purpose.replace('osha-', '');
+      oshaKitType =
+        purposeMap[template.purpose] || template.purpose.replace('osha-', '');
     }
 
     // Create the kit
-    const kitData: Omit<UserKit, 'id' | 'userId' | 'createdAt' | 'updatedAt'> = {
-      kitTemplateId: templateId,
-      kitTemplateName: templateName,
-      name: templateName,
-      locationId,
-      locationName,
-      status: 'active',
-    };
+    const kitData: Omit<UserKit, 'id' | 'userId' | 'createdAt' | 'updatedAt'> =
+      {
+        kitTemplateId: templateId,
+        kitTemplateName: templateName,
+        name: templateName,
+        locationId,
+        locationName,
+        status: 'active',
+      };
 
     // If it's an OSHA template, set OSHA fields (premium check happens in createUserKit)
     if (oshaKitType) {
@@ -432,9 +512,11 @@ export class UserKitsService {
             );
             continue;
           }
-          if (item.quantity <= 0) {
+          // Use actualQuantity if provided, otherwise default to 0
+          const actualQty = (item as any).actualQuantity ?? 0;
+          if (actualQty <= 0) {
             this.logger.warn(
-              `Skipping inventory item creation for ${item.supplyName || 'unknown item'}: quantity is ${item.quantity}`,
+              `Skipping inventory item creation for ${item.supplyName || 'unknown item'}: actualQuantity is ${actualQty}`,
             );
             continue;
           }
@@ -446,7 +528,7 @@ export class UserKitsService {
           }
           try {
             this.logger.log(
-              `Creating inventory item: ${item.supplyName || 'Unknown'} (supplyId: ${item.supplyId}, quantity: ${item.quantity}, locationId: ${locationId})`,
+              `Creating inventory item: ${item.supplyName || 'Unknown'} (supplyId: ${item.supplyId}, actualQuantity: ${actualQty}, locationId: ${locationId})`,
             );
             const inventoryItem =
               await this.inventoryService.createInventoryItem(userId, {
@@ -456,8 +538,8 @@ export class UserKitsService {
                 locationName,
                 kitId: kit.id,
                 kitName: kit.name,
-                quantity: item.quantity,
-                status: 'active',
+                actualQuantity: actualQty,
+                status: 'missing', // Will be calculated based on quantities
                 notes: (item as { notes?: string }).notes,
               });
             if (!inventoryItem || !inventoryItem.id) {
@@ -468,14 +550,14 @@ export class UserKitsService {
             }
             inventoryItemMap.set(item.supplyId, inventoryItem.id);
             this.logger.log(
-              `✅ Created inventory item for ${item.supplyName} (id: ${inventoryItem.id}, quantity: ${item.quantity}, kit: ${kit.name})`,
+              `✅ Created inventory item for ${item.supplyName} (id: ${inventoryItem.id}, actualQuantity: ${actualQty}, kit: ${kit.name})`,
             );
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
             const errorStack = error instanceof Error ? error.stack : undefined;
             this.logger.error(
-              `❌ Failed to create inventory item for ${item.supplyName || 'unknown'} (supplyId: ${item.supplyId}, quantity: ${item.quantity}): ${errorMessage}`,
+              `❌ Failed to create inventory item for ${item.supplyName || 'unknown'} (supplyId: ${item.supplyId}, actualQuantity: ${actualQty}): ${errorMessage}`,
               errorStack,
             );
             // Don't fail the entire operation if inventory creation fails
@@ -511,10 +593,8 @@ export class UserKitsService {
             `
             id,
             supply_id,
-            inventory_lots(
-              quantity_units,
-              status
-            )
+            actual_quantity,
+            quantity
           `,
           )
           .in('id', inventoryItemIds);
@@ -527,29 +607,17 @@ export class UserKitsService {
           // Create reverse map: inventoryItemId -> quantity, then map to supplyId
           const inventoryIdToQuantity = new Map<string, number>();
           inventoryItems.forEach((inv) => {
-            // Aggregate quantity from active lots (new schema) or use quantity field (old schema)
-            let quantity = 0;
-            if (inv.inventory_lots && Array.isArray(inv.inventory_lots)) {
-              // New schema: sum quantities from active lots
-              quantity = inv.inventory_lots
-                .filter((lot: any) => lot.status === 'active')
-                .reduce(
-                  (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-                  0,
-                );
-            } else {
-              // Old schema: use quantity field directly
-              quantity = (inv as any).quantity || 0;
-            }
-            inventoryIdToQuantity.set(inv.id, quantity);
+            // Read actual quantity directly from database column
+            const actualQty = inv.actual_quantity ?? 0;
+            inventoryIdToQuantity.set(inv.id, actualQty);
           });
 
-          // Map supplyId -> quantity
+          // Map supplyId -> actualQuantity
           inventoryItemMap.forEach((inventoryItemId, supplyId) => {
-            const quantity = inventoryIdToQuantity.get(inventoryItemId) || 0;
-            inventoryQuantitiesMap.set(supplyId, quantity);
+            const actualQty = inventoryIdToQuantity.get(inventoryItemId) || 0;
+            inventoryQuantitiesMap.set(supplyId, actualQty);
             this.logger.log(
-              `Mapped inventory quantity for supplyId ${supplyId}: ${quantity}`,
+              `Mapped inventory actualQuantity for supplyId ${supplyId}: ${actualQty}`,
             );
           });
         }
@@ -568,9 +636,11 @@ export class UserKitsService {
         const kitItems = templateItems
           .filter((item) => item.supplyId || item.supplyName)
           .map((item) => {
-            // Ensure quantity is a valid number (should be > 0 for template items)
+            // Ensure requiredQuantity is a valid number (should be > 0 for template items)
             const requiredQuantity =
-              item.quantity && item.quantity > 0 ? item.quantity : 0;
+              item.requiredQuantity && item.requiredQuantity > 0
+                ? item.requiredQuantity
+                : 0;
 
             // Create as requirement in inventory_items
             return {
@@ -581,7 +651,8 @@ export class UserKitsService {
                 ? null
                 : item.supplyName || 'Unknown item',
               supply_name: item.supplyName || 'Unknown item',
-              quantity: requiredQuantity, // Required quantity for requirements
+              required_quantity: requiredQuantity, // Required quantity for requirements
+              actual_quantity: 0, // Requirements have 0 actual quantity
               is_requirement: true, // This is a requirement/placeholder
               status: 'missing', // Default status for requirements
               notes: (item as { notes?: string }).notes,
@@ -620,13 +691,11 @@ export class UserKitsService {
           const templateItem = templateItems.find(
             (item) => item.supplyId === supplyId,
           );
-          if (templateItem && templateItem.quantity > 0) {
-            // The quantity field in inventory_items for actual items (is_requirement=false)
-            // should represent the required quantity, not the actual quantity
-            // Actual quantity comes from inventory_lots
+          if (templateItem && templateItem.requiredQuantity > 0) {
+            // Update required_quantity for actual items from template
             const { error: updateError } = await this.supabase
               .from('inventory_items')
-              .update({ quantity: templateItem.quantity })
+              .update({ required_quantity: templateItem.requiredQuantity })
               .eq('id', inventoryItemId);
 
             if (updateError) {
@@ -759,7 +828,9 @@ export class UserKitsService {
       (oshaTypeChanged && (updatedKit.is_osha_kit || updates.isOshaKit))
     ) {
       const oshaKitType =
-        updates.oshaKitType || updatedKit.osha_kit_type || currentKit.osha_kit_type;
+        updates.oshaKitType ||
+        updatedKit.osha_kit_type ||
+        currentKit.osha_kit_type;
       if (oshaKitType) {
         try {
           await this.recalculateCompliance(userId, kitId, oshaKitType);
@@ -774,7 +845,8 @@ export class UserKitsService {
           if (reloadedKit) {
             updatedKit.compliance_status = reloadedKit.compliance_status;
             updatedKit.compliance_score = reloadedKit.compliance_score;
-            updatedKit.last_compliance_check_at = reloadedKit.last_compliance_check_at;
+            updatedKit.last_compliance_check_at =
+              reloadedKit.last_compliance_check_at;
             updatedKit.compliance_metadata = reloadedKit.compliance_metadata;
           }
         } catch (error) {
@@ -785,7 +857,6 @@ export class UserKitsService {
         }
       }
     }
-
 
     // If location or name changed, update associated inventory items
     const locationChanged =
@@ -949,7 +1020,7 @@ export class UserKitsService {
     }
 
     // Delete all inventory items associated with this kit
-    // This will cascade delete inventory_lots due to ON DELETE CASCADE
+    // This will delete the inventory item (no lots table anymore)
     const { error: deleteItemsError } = await this.supabase
       .from('inventory_items')
       .delete()
@@ -1013,24 +1084,14 @@ export class UserKitsService {
   async getkitItems(
     userId: string,
     userKitId: string,
-  ): Promise<KitItemInstance[]> {
+  ): Promise<InventoryItem[]> {
     // Get user's tenant for scoping
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
 
     // Get all inventory items for this kit (both requirements and actual items)
     const { data: items, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('kit_id', userKitId.trim())
       .eq('tenant_id', tenant.id)
       .order('created_at', { ascending: true });
@@ -1048,49 +1109,20 @@ export class UserKitsService {
       if (share) {
         const result = await this.supabase
           .from('inventory_items')
-          .select(
-            `
-            *,
-            inventory_lots(
-              id,
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('*')
           .eq('kit_id', userKitId.trim());
 
-        // Use result data and error
-        const sharedItems = result.data;
-        const sharedItemsError = result.error;
-
-        if (!sharedItemsError && sharedItems) {
-          return (sharedItems || []).map((item: any) => {
-            let actualQty = 0;
-            if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-              actualQty = item.inventory_lots
-                .filter(
-                  (lot: any) =>
-                    lot.status === 'active' &&
-                    (!lot.expiration_date ||
-                      new Date(lot.expiration_date) >= new Date()),
-                )
-                .reduce(
-                  (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-                  0,
-                );
-            } else if (!item.is_requirement) {
-              actualQty = item.quantity || 0;
-            }
-
-            const requiredQty = item.is_requirement
-              ? item.quantity || 0
-              : item.quantity || 0;
-
-            return rowToKitItem(item, actualQty);
-          });
+        if (result.error) {
+          this.logger.error(
+            `Error fetching shared kit items: ${result.error.message}`,
+          );
+          return [];
         }
+
+        // Convert rows to InventoryItem - columns are already populated by database
+        return (result.data || []).map((item: any) =>
+          rowToInventoryItemForKit(item),
+        );
       }
     }
 
@@ -1099,37 +1131,8 @@ export class UserKitsService {
       return [];
     }
 
-    // Convert to KitItemInstance, calculating actual quantities from lots
-    return (items || []).map((item: any, index: number) => {
-      let actualQty = 0;
-
-      // For requirements (is_requirement = true), calculate actual from lots
-      // For actual items (is_requirement = false), use quantity or lots
-      if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-        actualQty = item.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      } else if (!item.is_requirement) {
-        // For actual items without lots, use quantity field
-        actualQty = item.quantity || 0;
-      }
-
-      // For requirements, quantity field is the required quantity
-      const requiredQty = item.is_requirement
-        ? item.quantity || 0
-        : item.quantity || 0;
-
-      const result = rowToKitItem(item, actualQty);
-      return result;
-    });
+    // Convert rows to InventoryItem - columns are already populated by database
+    return (items || []).map((item: any) => rowToInventoryItemForKit(item));
   }
 
   /**
@@ -1156,17 +1159,7 @@ export class UserKitsService {
     // This is a fallback, so we'll query without tenant_id filter
     const { data: items, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('kit_id', containerId)
       .order('created_at', { ascending: true });
 
@@ -1176,22 +1169,8 @@ export class UserKitsService {
     }
 
     return (items || []).map((item: any) => {
-      let actualQty = 0;
-      if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-        actualQty = item.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      } else if (!item.is_requirement) {
-        actualQty = item.quantity || 0;
-      }
+      // Read actual quantity directly from database column
+      const actualQty = item.actual_quantity ?? 0;
 
       return rowToKitItem(item, actualQty);
     });
@@ -1232,7 +1211,7 @@ export class UserKitsService {
     if (itemData.supplyId && itemData.supplyId.trim() !== '') {
       const { data: existing } = await this.supabase
         .from('inventory_items')
-        .select('id, is_requirement, quantity')
+        .select('id, is_requirement, required_quantity, actual_quantity')
         .eq('kit_id', userKitId)
         .eq('tenant_id', tenant.id)
         .eq('supply_id', itemData.supplyId)
@@ -1242,7 +1221,7 @@ export class UserKitsService {
       // For items without supplyId, check by freeform_name
       const { data: existing } = await this.supabase
         .from('inventory_items')
-        .select('id, is_requirement, quantity')
+        .select('id, is_requirement, required_quantity, actual_quantity')
         .eq('kit_id', userKitId)
         .eq('tenant_id', tenant.id)
         .eq('freeform_name', itemData.supplyName)
@@ -1262,7 +1241,7 @@ export class UserKitsService {
       if (itemData.supplyId && itemData.supplyId.trim() !== '') {
         const { data: existing } = await this.supabase
           .from('inventory_items')
-          .select('id, quantity')
+          .select('id, actual_quantity, required_quantity')
           .eq('kit_id', userKitId)
           .eq('supply_id', itemData.supplyId)
           .eq('is_requirement', false)
@@ -1273,7 +1252,7 @@ export class UserKitsService {
         // Note: unique constraint doesn't apply when supply_id is NULL
         const { data: existing } = await this.supabase
           .from('inventory_items')
-          .select('id, quantity')
+          .select('id, actual_quantity, required_quantity')
           .eq('kit_id', userKitId)
           .eq('freeform_name', itemData.supplyName)
           .is('supply_id', null)
@@ -1286,37 +1265,15 @@ export class UserKitsService {
         // Use existing inventory item
         inventoryItemId = existingInventoryItem.id;
 
-        // Get actual quantity from inventory lots
+        // Get actual quantity directly from item (no lots aggregation needed)
         const { data: invItem } = await this.supabase
           .from('inventory_items')
-          .select(
-            `
-            inventory_lots(
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('actual_quantity, required_quantity')
           .eq('id', existingInventoryItem.id)
           .single();
 
-        if (invItem?.inventory_lots) {
-          actualQty = invItem.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-              0,
-            );
-        } else {
-          // Fallback to quantity field if no lots
-          actualQty = existingInventoryItem.quantity || 0;
-        }
+        // Read actual_quantity from database column
+        actualQty = invItem?.actual_quantity ?? 0;
 
         this.logger.log(
           `✅ Using existing inventory item ${existingInventoryItem.id} for kit: ${itemData.supplyName}`,
@@ -1333,8 +1290,9 @@ export class UserKitsService {
                   : undefined,
               supplyName: itemData.supplyName || 'Unknown item',
               locationId: kit.location_id,
-              quantity: itemData.requiredQuantity,
-              status: 'active',
+              actualQuantity: itemData.requiredQuantity || 0,
+              requiredQuantity: itemData.requiredQuantity,
+              status: 'missing', // Will be calculated based on quantities
               notes: itemData.notes,
               kitId: userKitId,
               expirationDate: (itemData as any).expirationDate
@@ -1343,7 +1301,8 @@ export class UserKitsService {
             } as any,
           );
           inventoryItemId = inventoryItem.id;
-          actualQty = inventoryItem.quantity || itemData.requiredQuantity;
+          actualQty =
+            inventoryItem.actualQuantity || itemData.requiredQuantity || 0;
           this.logger.log(
             `✅ Created inventory item ${inventoryItem.id} for kit: ${itemData.supplyName}`,
           );
@@ -1371,31 +1330,12 @@ export class UserKitsService {
         // Get actual quantity from inventory lots
         const { data: invItem } = await this.supabase
           .from('inventory_items')
-          .select(
-            `
-            inventory_lots(
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('actual_quantity, required_quantity')
           .eq('id', itemData.inventoryItemId)
           .single();
 
-        if (invItem?.inventory_lots) {
-          actualQty = invItem.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-              0,
-            );
-        }
+        // Read actual quantity directly from database column
+        actualQty = invItem?.actual_quantity ?? 0;
 
         this.logger.log(
           `✅ Assigned inventory item ${itemData.inventoryItemId} to kit ${userKitId}`,
@@ -1425,33 +1365,41 @@ export class UserKitsService {
 
     if (existingItem) {
       // Update existing requirement
+      // Update requirement and set required_quantity
+      // Also update matching actual items' required_quantity (trigger will do this, but set explicitly)
+      const updateData: any = {
+        required_quantity: requiredQty, // Set required_quantity column
+        actual_quantity: 0, // Requirements have 0 actual quantity
+        supply_name: itemData.supplyName,
+        freeform_name: itemData.supplyId ? null : itemData.supplyName,
+        notes: itemData.notes,
+        status: status,
+        updated_at: now.toISOString(),
+      };
+
+      await this.supabase
+        .from('inventory_items')
+        .update(updateData)
+        .eq('id', existingItem.id);
+
+      // Update matching actual items' required_quantity
+      await this.supabase
+        .from('inventory_items')
+        .update({ required_quantity: requiredQty })
+        .eq('kit_id', userKitId)
+        .eq('tenant_id', tenant.id)
+        .eq('is_requirement', false)
+        .or(
+          itemData.supplyId
+            ? `supply_id.eq.${itemData.supplyId}`
+            : `freeform_name.eq.${itemData.supplyName}`,
+        );
+
+      // Fetch updated item
       const { data: updated, error: updateError } = await this.supabase
         .from('inventory_items')
-        .update({
-          quantity: requiredQty, // Required quantity for requirements
-          supply_name: itemData.supplyName,
-          freeform_name: itemData.supplyId ? null : itemData.supplyName,
-          notes: itemData.notes,
-          status:
-            status === 'complete'
-              ? 'active'
-              : status === 'partial'
-                ? 'active'
-                : 'missing',
-          updated_at: now.toISOString(),
-        })
+        .select('*')
         .eq('id', existingItem.id)
-        .select(
-          `
-          *,
-          inventory_lots(
-            id,
-            quantity_units,
-            status,
-            expiration_date
-          )
-        `,
-        )
         .single();
 
       if (updateError) {
@@ -1459,20 +1407,8 @@ export class UserKitsService {
       }
       kitItemId = updated.id;
 
-      // Recalculate actual quantity
-      if (updated.inventory_lots && Array.isArray(updated.inventory_lots)) {
-        actualQty = updated.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      }
+      // Read actual quantity directly from database column
+      actualQty = updated.actual_quantity ?? 0;
     } else {
       // Create new requirement
       // Note: If an inventory item already exists (from createInventoryItem above),
@@ -1482,30 +1418,16 @@ export class UserKitsService {
         const { data: updated, error: updateError } = await this.supabase
           .from('inventory_items')
           .update({
-            quantity: requiredQty, // Required quantity for requirements
+            required_quantity: requiredQty, // Set required_quantity column
+            actual_quantity: 0, // Requirements have 0 actual quantity
             supply_name: itemData.supplyName,
             freeform_name: itemData.supplyId ? null : itemData.supplyName,
             notes: itemData.notes,
-            status:
-              status === 'complete'
-                ? 'active'
-                : status === 'partial'
-                  ? 'active'
-                  : 'missing',
+            status: status,
             updated_at: now.toISOString(),
           })
           .eq('id', inventoryItemId)
-          .select(
-            `
-            *,
-            inventory_lots(
-              id,
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('*')
           .single();
 
         if (updateError) {
@@ -1513,20 +1435,8 @@ export class UserKitsService {
         }
         kitItemId = updated.id;
 
-        // Recalculate actual quantity
-        if (updated.inventory_lots && Array.isArray(updated.inventory_lots)) {
-          actualQty = updated.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-              0,
-            );
-        }
+        // Read actual quantity directly from database column
+        actualQty = updated.actual_quantity ?? 0;
       } else {
         // Create new requirement (no inventory item exists)
         const { data: newItem, error: createError } = await this.supabase
@@ -1538,29 +1448,15 @@ export class UserKitsService {
             freeform_name: itemData.supplyId ? null : itemData.supplyName,
             supply_name: itemData.supplyName,
             location_id: kit.location_id,
-            quantity: requiredQty, // Required quantity for requirements
+            required_quantity: requiredQty, // Set required_quantity column
+            actual_quantity: 0, // Requirements have 0 actual quantity
             is_requirement: true, // This is a requirement/placeholder
-            status:
-              status === 'complete'
-                ? 'active'
-                : status === 'partial'
-                  ? 'active'
-                  : 'missing',
+            status: status,
             notes: itemData.notes,
             created_at: now.toISOString(),
             updated_at: now.toISOString(),
           })
-          .select(
-            `
-            *,
-            inventory_lots(
-              id,
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('*')
           .single();
 
         if (createError) {
@@ -1568,37 +1464,15 @@ export class UserKitsService {
         }
         kitItemId = newItem.id;
 
-        // Recalculate actual quantity from new item
-        if (newItem.inventory_lots && Array.isArray(newItem.inventory_lots)) {
-          actualQty = newItem.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-              0,
-            );
-        }
+        // Read actual quantity directly from database column (0 for requirements)
+        actualQty = newItem.actual_quantity ?? 0;
       }
     }
 
     // Fetch the final item to return
     const { data: finalItem } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('id', kitItemId)
       .single();
 
@@ -1652,8 +1526,9 @@ export class UserKitsService {
             supplyId: itemData.supplyId,
             supplyName: itemData.supplyName || 'Unknown item',
             locationId: container.location_id,
-            quantity: itemData.requiredQuantity,
-            status: 'active',
+            actualQuantity: itemData.requiredQuantity || 0,
+            requiredQuantity: itemData.requiredQuantity,
+            // Status will be calculated automatically based on quantities
             notes: itemData.notes,
             containerId: containerId,
             expirationDate: (itemData as any).expirationDate
@@ -1662,7 +1537,8 @@ export class UserKitsService {
           } as any,
         );
         inventoryItemId = inventoryItem.id;
-        actualQty = inventoryItem.quantity || itemData.requiredQuantity;
+        actualQty =
+          inventoryItem.actualQuantity || itemData.requiredQuantity || 0;
         this.logger.log(
           `✅ Created inventory item ${inventoryItem.id} for kit: ${itemData.supplyName}`,
         );
@@ -1689,31 +1565,12 @@ export class UserKitsService {
         // Get actual quantity from inventory lots
         const { data: invItem } = await this.supabase
           .from('inventory_items')
-          .select(
-            `
-            inventory_lots(
-              quantity_units,
-              status,
-              expiration_date
-            )
-          `,
-          )
+          .select('actual_quantity, required_quantity')
           .eq('id', itemData.inventoryItemId)
           .single();
 
-        if (invItem?.inventory_lots) {
-          actualQty = invItem.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-              0,
-            );
-        }
+        // Read actual quantity directly from database column
+        actualQty = invItem?.actual_quantity ?? 0;
 
         this.logger.log(
           `✅ Assigned inventory item ${itemData.inventoryItemId} to container ${containerId}`,
@@ -1746,30 +1603,16 @@ export class UserKitsService {
       const { data: updated, error: updateError } = await this.supabase
         .from('inventory_items')
         .update({
-          quantity: requiredQty,
+          required_quantity: requiredQty,
+          actual_quantity: 0, // Requirements have 0 actual quantity
           supply_name: itemData.supplyName,
           freeform_name: itemData.supplyId ? null : itemData.supplyName,
           notes: itemData.notes,
-          status:
-            status === 'complete'
-              ? 'active'
-              : status === 'partial'
-                ? 'active'
-                : 'missing',
+          status: status,
           updated_at: now.toISOString(),
         })
         .eq('id', existingItem.id)
-        .select(
-          `
-          *,
-          inventory_lots(
-            id,
-            quantity_units,
-            status,
-            expiration_date
-          )
-        `,
-        )
+        .select('*')
         .single();
 
       if (updateError) {
@@ -1777,20 +1620,8 @@ export class UserKitsService {
       }
       kitItemId = updated.id;
 
-      // Recalculate actual quantity
-      if (updated.inventory_lots && Array.isArray(updated.inventory_lots)) {
-        actualQty = updated.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      }
+      // Read actual quantity directly from database column
+      actualQty = updated.actual_quantity ?? 0;
     } else {
       // Create new requirement (deprecated method)
       const { data: newItem, error: createError } = await this.supabase
@@ -1802,29 +1633,15 @@ export class UserKitsService {
           freeform_name: itemData.supplyId ? null : itemData.supplyName,
           supply_name: itemData.supplyName,
           location_id: container.location_id,
-          quantity: requiredQty,
+          required_quantity: requiredQty,
+          actual_quantity: 0, // Requirements have 0 actual quantity
           is_requirement: true,
-          status:
-            status === 'complete'
-              ? 'active'
-              : status === 'partial'
-                ? 'active'
-                : 'missing',
+          status: status,
           notes: itemData.notes,
           created_at: now.toISOString(),
           updated_at: now.toISOString(),
         })
-        .select(
-          `
-          *,
-          inventory_lots(
-            id,
-            quantity_units,
-            status,
-            expiration_date
-          )
-        `,
-        )
+        .select('*')
         .single();
 
       if (createError) {
@@ -1833,35 +1650,14 @@ export class UserKitsService {
       kitItemId = newItem.id;
 
       // Recalculate actual quantity
-      if (newItem.inventory_lots && Array.isArray(newItem.inventory_lots)) {
-        actualQty = newItem.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      }
+      // Read actual quantity directly from database column (0 for requirements)
+      actualQty = newItem.actual_quantity ?? 0;
     }
 
     // Fetch the final item to return
     const { data: finalItem } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('id', kitItemId)
       .single();
 
@@ -1921,13 +1717,15 @@ export class UserKitsService {
             locationId: kit.location_id,
             locationName: locationName,
             kitId: kit.id,
-            quantity: itemData.requiredQuantity,
-            status: 'active',
+            actualQuantity: itemData.requiredQuantity || 0,
+            requiredQuantity: itemData.requiredQuantity,
+            // Status will be calculated automatically based on quantities
             notes: itemData.notes,
           } as any,
         );
         inventoryItemId = inventoryItem.id;
-        actualQuantity = inventoryItem.quantity || itemData.requiredQuantity;
+        actualQuantity =
+          inventoryItem.actualQuantity || itemData.requiredQuantity || 0;
       } catch (error) {
         this.logger.error(`Failed to create inventory item: ${error}`);
       }
@@ -1936,7 +1734,7 @@ export class UserKitsService {
     if (inventoryItemId) {
       const { data: inventoryItem } = await this.supabase
         .from('inventory_items')
-        .select('quantity, kit_id, tenant_id')
+        .select('required_quantity, actual_quantity, kit_id, tenant_id')
         .eq('id', inventoryItemId)
         .eq('tenant_id', tenant.id)
         .single();
@@ -1977,48 +1775,23 @@ export class UserKitsService {
         freeform_name: itemData.supplyId ? null : itemData.supplyName,
         supply_name: itemData.supplyName,
         location_id: kit.location_id,
-        quantity: itemData.requiredQuantity, // Required quantity for requirements
+        required_quantity: itemData.requiredQuantity, // Required quantity for requirements
+        actual_quantity: 0, // Requirements have 0 actual quantity
         is_requirement: true, // This is a requirement/placeholder
-        status:
-          status === 'complete'
-            ? 'active'
-            : status === 'partial'
-              ? 'active'
-              : 'missing',
+        status: status,
         notes: itemData.notes,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       })
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .single();
 
     if (error) {
       throw new Error(`Failed to create kit item: ${error.message}`);
     }
 
-    // Calculate actual quantity from lots if available
-    let actualQty = 0;
-    if (data.inventory_lots && Array.isArray(data.inventory_lots)) {
-      actualQty = data.inventory_lots
-        .filter(
-          (lot: any) =>
-            lot.status === 'active' &&
-            (!lot.expiration_date ||
-              new Date(lot.expiration_date) >= new Date()),
-        )
-        .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-    }
-
+    // Read actual quantity directly from database column
+    const actualQty = data.actual_quantity ?? 0;
     return rowToKitItem(data, actualQty);
   }
 
@@ -2052,17 +1825,7 @@ export class UserKitsService {
     // Get current item
     const { data: currentItem, error: itemError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('id', itemId)
       .eq('kit_id', userKitId)
       .eq('tenant_id', tenant.id)
@@ -2072,23 +1835,8 @@ export class UserKitsService {
       throw new NotFoundException('Kit item instance not found');
     }
 
-    // Calculate current actual quantity from lots
-    let currentActualQty = 0;
-    if (
-      currentItem.inventory_lots &&
-      Array.isArray(currentItem.inventory_lots)
-    ) {
-      currentActualQty = currentItem.inventory_lots
-        .filter(
-          (lot: any) =>
-            lot.status === 'active' &&
-            (!lot.expiration_date ||
-              new Date(lot.expiration_date) >= new Date()),
-        )
-        .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-    } else if (!currentItem.is_requirement) {
-      currentActualQty = currentItem.quantity || 0;
-    }
+    // Read current actual quantity directly from database column
+    const currentActualQty = currentItem.actual_quantity ?? 0;
 
     const itemData = rowToKitItem(currentItem, currentActualQty);
 
@@ -2117,13 +1865,11 @@ export class UserKitsService {
     }
 
     const updateData: any = {
-      quantity: requiredQuantity, // For requirements, quantity is the required quantity
-      status:
-        status === 'complete'
-          ? 'active'
-          : status === 'partial'
-            ? 'active'
-            : 'missing',
+      actual_quantity: currentItem.is_requirement ? 0 : actualQuantity, // Set actual_quantity
+      required_quantity: currentItem.is_requirement
+        ? requiredQuantity
+        : currentItem.required_quantity, // Set required_quantity
+      status: status, // Use calculated status directly (complete, partial, or missing)
       updated_at: new Date().toISOString(),
     };
 
@@ -2141,41 +1887,15 @@ export class UserKitsService {
       .from('inventory_items')
       .update(updateData)
       .eq('id', itemId)
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .single();
 
     if (updateError) {
       throw new Error(`Failed to update kit item: ${updateError.message}`);
     }
 
-    // Recalculate actual quantity
-    let actualQty = 0;
-    if (
-      updatedItem.inventory_lots &&
-      Array.isArray(updatedItem.inventory_lots)
-    ) {
-      actualQty = updatedItem.inventory_lots
-        .filter(
-          (lot: any) =>
-            lot.status === 'active' &&
-            (!lot.expiration_date ||
-              new Date(lot.expiration_date) >= new Date()),
-        )
-        .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-    } else if (!updatedItem.is_requirement) {
-      actualQty = updatedItem.quantity || 0;
-    }
-
+    // Read actual quantity directly from database column
+    const actualQty = updatedItem.actual_quantity ?? 0;
     return rowToKitItem(updatedItem, actualQty);
   }
 
@@ -2220,17 +1940,7 @@ export class UserKitsService {
     // Get the item from source kit
     const { data: sourceItem, error: itemError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('id', itemId)
       .eq('kit_id', sourceKitId)
       .eq('tenant_id', tenant.id)
@@ -2240,21 +1950,8 @@ export class UserKitsService {
       throw new NotFoundException('Kit item instance not found');
     }
 
-    // Calculate actual quantity from lots
-    let actualQty = 0;
-    if (sourceItem.inventory_lots && Array.isArray(sourceItem.inventory_lots)) {
-      actualQty = sourceItem.inventory_lots
-        .filter(
-          (lot: any) =>
-            lot.status === 'active' &&
-            (!lot.expiration_date ||
-              new Date(lot.expiration_date) >= new Date()),
-        )
-        .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-    } else if (!sourceItem.is_requirement) {
-      actualQty = sourceItem.quantity || 0;
-    }
-
+    // Read actual quantity directly from database column
+    const actualQty = sourceItem.actual_quantity ?? 0;
     const itemData = rowToKitItem(sourceItem, actualQty);
     const now = new Date();
 
@@ -2287,17 +1984,7 @@ export class UserKitsService {
         updated_at: now.toISOString(),
       })
       .eq('id', itemId)
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .single();
 
     if (updateError) {
@@ -2306,24 +1993,8 @@ export class UserKitsService {
       );
     }
 
-    // Recalculate actual quantity
-    let finalActualQty = 0;
-    if (
-      updatedItem.inventory_lots &&
-      Array.isArray(updatedItem.inventory_lots)
-    ) {
-      finalActualQty = updatedItem.inventory_lots
-        .filter(
-          (lot: any) =>
-            lot.status === 'active' &&
-            (!lot.expiration_date ||
-              new Date(lot.expiration_date) >= new Date()),
-        )
-        .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-    } else if (!updatedItem.is_requirement) {
-      finalActualQty = updatedItem.quantity || 0;
-    }
-
+    // Read actual quantity directly from database column
+    const finalActualQty = updatedItem.actual_quantity ?? 0;
     return rowToKitItem(updatedItem, finalActualQty);
   }
 
@@ -2404,17 +2075,7 @@ export class UserKitsService {
     // Get all kit requirements (is_requirement = true)
     const { data: items, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `,
-      )
+      .select('*')
       .eq('kit_id', userKitId)
       .eq('tenant_id', tenant.id)
       .eq('is_requirement', true);
@@ -2433,27 +2094,16 @@ export class UserKitsService {
 
     // Update items that need updating
     for (const item of items) {
-      const requiredQuantity = item.quantity || 0; // For requirements, quantity is required quantity
+      // For requirements, use required_quantity; for actual items, use the provided quantity as requiredQuantity
+      const requiredQuantity =
+        item.required_quantity ??
+        (item.is_requirement ? (item as any).quantity || 0 : 0);
 
-      // Calculate actual quantity from lots
-      let actualQuantity = 0;
-      if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-        actualQuantity = item.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce(
-            (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-            0,
-          );
-      }
+      // Read actual quantity directly from database column
+      const actualQuantity = item.actual_quantity ?? 0;
 
       // Only update if actualQuantity is different from requiredQuantity
-      // Note: This updates the status, but actual quantity comes from inventory_lots
-      // So we're mainly updating the status field
+      // Note: This updates the status based on actual vs required quantity
       if (actualQuantity !== requiredQuantity) {
         const status: 'missing' | 'partial' | 'complete' =
           actualQuantity >= requiredQuantity
@@ -2465,12 +2115,7 @@ export class UserKitsService {
         const { error: updateError } = await this.supabase
           .from('inventory_items')
           .update({
-            status:
-              status === 'complete'
-                ? 'active'
-                : status === 'partial'
-                  ? 'active'
-                  : 'missing',
+            status: status,
             updated_at: now.toISOString(),
           })
           .eq('id', item.id);

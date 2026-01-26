@@ -126,17 +126,16 @@ export class ComplianceService {
     // Get kit items (requirements and actual items)
     const { data: kitItems, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(`
+      .select(
+        `
         supply_id,
         freeform_name,
         is_requirement,
         quantity,
-        inventory_lots(
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `)
+        actual_quantity,
+        required_quantity
+      `,
+      )
       .eq('kit_id', userKitId);
 
     if (itemsError) {
@@ -181,20 +180,9 @@ export class ComplianceService {
       const kitItem = (kitItems || []).find(
         (item: any) => item.supply_id === required.supplyId,
       );
-      
-      // Calculate actual quantity from inventory_lots
-      let actualQuantity = 0;
-      if (kitItem?.inventory_lots && Array.isArray(kitItem.inventory_lots)) {
-        actualQuantity = kitItem.inventory_lots
-          .filter((lot: any) => 
-            lot.status === 'active' && 
-            (!lot.expiration_date || new Date(lot.expiration_date) >= new Date())
-          )
-          .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-      } else if (kitItem && !kitItem.is_requirement) {
-        // For actual items without lots, use quantity field
-        actualQuantity = kitItem.quantity || 0;
-      }
+
+      // Read actual quantity directly from database column
+      const actualQuantity = kitItem?.actual_quantity ?? 0;
 
       if (actualQuantity < required.quantity) {
         missingItems.push({
@@ -211,24 +199,11 @@ export class ComplianceService {
       (sum, req) => sum + req.quantity,
       0,
     );
-    const totalActual = (kitItems || []).reduce(
-      (sum: number, item: any) => {
-        // Calculate actual quantity from lots
-        let actualQty = 0;
-        if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-          actualQty = item.inventory_lots
-            .filter((lot: any) => 
-              lot.status === 'active' && 
-              (!lot.expiration_date || new Date(lot.expiration_date) >= new Date())
-            )
-            .reduce((lotSum: number, lot: any) => lotSum + (lot.quantity_units || 0), 0);
-        } else if (!item.is_requirement) {
-          actualQty = item.quantity || 0;
-        }
-        return sum + actualQty;
-      },
-      0,
-    );
+    const totalActual = (kitItems || []).reduce((sum: number, item: any) => {
+      // Read actual quantity directly from database column
+      const actualQty = item.actual_quantity ?? 0;
+      return sum + actualQty;
+    }, 0);
     const complianceScore = Math.round((totalActual / totalRequired) * 100);
 
     let complianceStatus: ComplianceCheck['complianceStatus'] = 'compliant';
@@ -383,17 +358,16 @@ export class ComplianceService {
     // Get kit items
     const { data: kitItems, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(`
+      .select(
+        `
         supply_id,
         freeform_name,
         is_requirement,
         quantity,
-        inventory_lots(
-          quantity_units,
-          status,
-          expiration_date
-        )
-      `)
+        actual_quantity,
+        required_quantity
+      `,
+      )
       .eq('kit_id', kitId);
 
     if (itemsError) {
@@ -418,20 +392,8 @@ export class ComplianceService {
         (item: any) => item.supply_id === required.supplyId,
       );
 
-      // Calculate actual quantity from inventory_lots
-      let actualQuantity = 0;
-      if (kitItem?.inventory_lots && Array.isArray(kitItem.inventory_lots)) {
-        actualQuantity = kitItem.inventory_lots
-          .filter(
-            (lot: any) =>
-              lot.status === 'active' &&
-              (!lot.expiration_date ||
-                new Date(lot.expiration_date) >= new Date()),
-          )
-          .reduce((sum: number, lot: any) => sum + (lot.quantity_units || 0), 0);
-      } else if (kitItem && !kitItem.is_requirement) {
-        actualQuantity = kitItem.quantity || 0;
-      }
+      // Read actual quantity directly from database column
+      const actualQuantity = kitItem?.actual_quantity ?? 0;
 
       if (actualQuantity < required.quantity) {
         missingItems.push({
@@ -448,35 +410,21 @@ export class ComplianceService {
       (sum, req) => sum + req.quantity,
       0,
     );
-    const totalActual = (kitItems || []).reduce(
-      (sum: number, item: any) => {
-        let actualQty = 0;
-        if (item.inventory_lots && Array.isArray(item.inventory_lots)) {
-          actualQty = item.inventory_lots
-            .filter(
-              (lot: any) =>
-                lot.status === 'active' &&
-                (!lot.expiration_date ||
-                  new Date(lot.expiration_date) >= new Date()),
-            )
-            .reduce(
-              (lotSum: number, lot: any) => lotSum + (lot.quantity_units || 0),
-              0,
-            );
-        } else if (!item.is_requirement) {
-          actualQty = item.quantity || 0;
-        }
-        return sum + actualQty;
-      },
-      0,
-    );
+    const totalActual = (kitItems || []).reduce((sum: number, item: any) => {
+      // Read actual quantity directly from database column
+      const actualQty = item.actual_quantity ?? 0;
+      return sum + actualQty;
+    }, 0);
     const complianceScore = Math.min(
       100,
       Math.max(0, Math.round((totalActual / totalRequired) * 100)),
     );
 
-    let complianceStatus: 'compliant' | 'non_compliant' | 'partial' | 'not_checked' =
-      'compliant';
+    let complianceStatus:
+      | 'compliant'
+      | 'non_compliant'
+      | 'partial'
+      | 'not_checked' = 'compliant';
     if (complianceScore < 100) {
       complianceStatus =
         missingItems.length === rule.requiredSupplies.length

@@ -23,7 +23,6 @@ export class NotificationGeneratorService {
         .from('inventory_items')
         .select('*')
         .eq('user_id', userId)
-        .eq('status', 'active')
         .gte('expiration_date', now.toISOString())
         .lte('expiration_date', thresholdDate.toISOString());
 
@@ -59,8 +58,7 @@ export class NotificationGeneratorService {
       .from('inventory_items')
       .select('*')
       .eq('user_id', userId)
-      .eq('status', 'active')
-      .lte('quantity', threshold);
+      .lte('actual_quantity', threshold);
 
     if (error) {
       throw new Error(`Failed to get inventory items: ${error.message}`);
@@ -70,7 +68,7 @@ export class NotificationGeneratorService {
       await this.notificationsService.createNotification(userId, {
         type: 'low_stock',
         title: 'Low Stock Alert',
-        message: `${item.supply_name} is running low (${item.quantity} remaining)`,
+        message: `${item.supply_name} is running low (${item.actual_quantity} remaining)`,
         data: {
           inventoryItemId: item.id,
         },

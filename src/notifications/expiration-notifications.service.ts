@@ -14,7 +14,7 @@ interface InventoryItem {
   user_id: string;
   supply_name: string;
   expiration_date?: string;
-  status: 'active' | 'expired' | 'used' | 'disposed';
+  status: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
   sent_notifications?: string[]; // Array of days (e.g., ['60', '30', '10', '1'])
 }
 
@@ -31,6 +31,7 @@ export class ExpirationNotificationsService {
 
   /**
    * Run daily at 9 AM to check for expiring items and send notifications
+   * Also automatically sets items to 'expired' status when expiration date has passed
    */
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async handleExpirationNotifications() {
@@ -40,6 +41,7 @@ export class ExpirationNotificationsService {
     try {
       const now = new Date();
       let totalNotificationsSent = 0;
+      let totalExpiredUpdated = 0;
 
       // Get all active users
       const { data: users, error: usersError } = await this.supabase
@@ -62,7 +64,6 @@ export class ExpirationNotificationsService {
           .from('inventory_items')
           .select('*')
           .eq('user_id', userId)
-          .eq('status', 'active')
           .not('expiration_date', 'is', null);
 
         if (itemsError) {
@@ -81,6 +82,39 @@ export class ExpirationNotificationsService {
           const daysUntilExpiration = Math.ceil(
             (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
           );
+
+          // Check if item has expired and update status if needed
+          // Only update items that aren't already in lifecycle states
+          const lifecycleStates = ['used', 'disposed', 'expired'];
+          const currentStatus = item.status as string;
+          
+          if (
+            expirationDate < now &&
+            !lifecycleStates.includes(currentStatus)
+          ) {
+            try {
+              await this.supabase
+                .from('inventory_items')
+                .update({
+                  status: 'expired',
+                  updated_at: now.toISOString(),
+                })
+                .eq('id', item.id)
+                .eq('user_id', userId);
+              
+              totalExpiredUpdated++;
+              logger.log(
+                `Updated item ${item.id} (${item.supply_name}) to expired status`,
+              );
+            } catch (error) {
+              logger.error(
+                `Error updating expired status for item ${item.id}:`,
+                error,
+              );
+            }
+            // Skip notification logic for expired items
+            continue;
+          }
 
           // Check each alert threshold (in descending order: 60, 30, 10, 1)
           for (const alertDays of this.alertDays) {
@@ -124,7 +158,7 @@ export class ExpirationNotificationsService {
 
       const duration = Date.now() - startTime;
       logger.log(
-        `Completed expiration notification check. Sent ${totalNotificationsSent} notifications in ${duration}ms`,
+        `Completed expiration notification check. Sent ${totalNotificationsSent} notifications, updated ${totalExpiredUpdated} items to expired status in ${duration}ms`,
       );
     } catch (error) {
       logger.error('Error in expiration notification check:', error);

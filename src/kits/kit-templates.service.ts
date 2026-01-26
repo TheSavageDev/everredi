@@ -290,7 +290,7 @@ export class KitTemplatesService {
    */
   private calculateItemQuantity(
     item: {
-      quantity: number;
+      requiredQuantity: number;
       scalesWithPeople?: boolean;
       peopleCountQuantities?: Record<number, number>;
     },
@@ -305,14 +305,14 @@ export class KitTemplatesService {
       return item.peopleCountQuantities[selectedPeopleCount];
     }
 
-    // If item scales with people, multiply base quantity
+    // If item scales with people, multiply base requiredQuantity
     if (item.scalesWithPeople === true) {
       const multiplier = selectedPeopleCount / defaultPeopleCount;
-      return Math.ceil(item.quantity * multiplier);
+      return Math.ceil(item.requiredQuantity * multiplier);
     }
 
-    // Otherwise, use base quantity unchanged
-    return item.quantity;
+    // Otherwise, use base requiredQuantity unchanged
+    return item.requiredQuantity;
   }
 
   async getTemplateItems(
@@ -323,7 +323,7 @@ export class KitTemplatesService {
     Array<{
       supplyId: string;
       supplyName?: string;
-      quantity: number;
+      requiredQuantity: number;
       notes?: string;
     }>
   > {
@@ -355,9 +355,12 @@ export class KitTemplatesService {
     }
 
     return (items || []).map((item: any) => {
-      const quantity = this.calculateItemQuantity(
+      // For old schema (kit_template_items), read from quantity column
+      // For new schema (kit_template_revision_items), read from required_units column
+      const baseQuantity = item.required_units ?? item.quantity ?? 0;
+      const requiredQuantity = this.calculateItemQuantity(
         {
-          quantity: item.quantity,
+          requiredQuantity: baseQuantity,
           scalesWithPeople: item.scales_with_people,
           peopleCountQuantities: item.people_count_quantities,
         },
@@ -367,7 +370,7 @@ export class KitTemplatesService {
       return {
         supplyId: item.supply_id,
         supplyName: item.supply_name,
-        quantity,
+        requiredQuantity,
         notes: item.notes,
       };
     });

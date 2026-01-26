@@ -185,23 +185,28 @@ export class UserKitsController {
     },
   ) {
     // Always get template items (for both empty and fully loaded kits)
-    let templateItems:
-      | Array<{
-          supplyId: string;
-          supplyName?: string;
-          quantity: number;
-          notes?: string;
-        }>
-      | undefined;
+    let templateItems: Array<{
+      supplyId: string;
+      supplyName?: string;
+      requiredQuantity: number;
+      notes?: string;
+    }> | undefined;
 
     if (body.isPublicTemplate) {
       // For public templates, get items directly from the public template
       try {
-        templateItems =
+        const publicItems =
           await this.publicTemplatesService.getPublicTemplateItems(
             body.templateId,
             body.selectedPeopleCount,
           );
+        // Map quantity to requiredQuantity
+        templateItems = publicItems.map((item) => ({
+          supplyId: item.supplyId,
+          supplyName: item.supplyName,
+          requiredQuantity: item.quantity,
+          notes: item.notes,
+        }));
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';

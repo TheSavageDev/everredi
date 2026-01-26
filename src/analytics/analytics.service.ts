@@ -58,7 +58,7 @@ export class AnalyticsService {
       .from('inventory_items')
       .select('id, supply_id, supply_name, updated_at')
       .eq('user_id', userId)
-      .eq('status', 'used');
+      .eq('status', 'complete');
 
     if (error) {
       throw new Error(`Failed to get inventory items: ${error.message}`);
@@ -161,10 +161,9 @@ export class AnalyticsService {
     const { data: items, error } = await this.supabase
       .from('inventory_items')
       .select(
-        'id, expiration_date, purchase_price, quantity, supply_name, supply_category_id',
+        'id, expiration_date, purchase_price, actual_quantity, supply_name, supply_category_id',
       )
       .eq('user_id', userId)
-      .eq('status', 'active')
       .not('expiration_date', 'is', null)
       .lte('expiration_date', futureDate.toISOString());
 
@@ -183,7 +182,7 @@ export class AnalyticsService {
         );
 
         const estimatedValue =
-          (parseFloat(item.purchase_price) || 0) * (item.quantity || 1);
+          (parseFloat(item.purchase_price) || 0) * (item.actual_quantity ?? 1);
 
         // Get category name if needed
         let categoryName: string | undefined;
@@ -216,9 +215,9 @@ export class AnalyticsService {
   async getCostTracking(userId: string): Promise<CostTracking> {
     const { data: items, error } = await this.supabase
       .from('inventory_items')
-      .select('id, purchase_price, quantity, supply_category_id, purchase_date')
+      .select('id, purchase_price, actual_quantity, supply_category_id, purchase_date')
       .eq('user_id', userId)
-      .eq('status', 'active');
+;
 
     if (error) {
       throw new Error(`Failed to get inventory items: ${error.message}`);
@@ -257,7 +256,7 @@ export class AnalyticsService {
 
     (items || []).forEach((item: any) => {
       const itemValue =
-        (parseFloat(item.purchase_price) || 0) * (item.quantity || 1);
+        (parseFloat(item.purchase_price) || 0) * (item.actual_quantity ?? 1);
       totalInventoryValue += itemValue;
 
       const categoryId = item.supply_category_id || 'uncategorized';
@@ -288,7 +287,8 @@ export class AnalyticsService {
           const existing = monthlySpending.get(monthKey) || 0;
           monthlySpending.set(
             monthKey,
-            existing + parseFloat(item.purchase_price) * (item.quantity || 1),
+            existing +
+              parseFloat(item.purchase_price) * (item.actual_quantity ?? 1),
           );
         }
       }
@@ -320,9 +320,7 @@ export class AnalyticsService {
     // Get latest compliance check for each kit
     const { data: checks, error } = await this.supabase
       .from('compliance_checks')
-      .select(
-        'kit_id, compliance_score, checked_at, missing_items, kits(name)',
-      )
+      .select('kit_id, compliance_score, checked_at, missing_items, kits(name)')
       .eq('user_id', userId)
       .order('checked_at', { ascending: false });
 

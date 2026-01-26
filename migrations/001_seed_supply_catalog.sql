@@ -240,6 +240,7 @@ VALUES
   ('Surface Disinfectant Wipes', 'Disposable wipes for surface disinfection', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
   ('Isopropyl Alcohol', 'Isopropyl alcohol for disinfection', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'bottle', 'each', true, 1095, false, 'global', NULL, NOW(), NOW()),
   ('Chlorhexidine Wipes', 'Antiseptic wipes for skin preparation', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('Alcohol Prep Pad', 'Disposable alcohol prep pad for injection site cleaning', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
 
 -- Burn Care
   ('Burn Gel', 'Cooling gel for treating minor burns', 'a7b8c9d0-e1f2-4345-a678-901234567890', 'Burn Care', NULL, 'tube', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
@@ -277,14 +278,8 @@ VALUES
   ('Lancing Device', 'Device for obtaining blood samples', 'e1f2a3b4-c5d6-4789-e012-345678901234', 'Monitoring & Diagnostics', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
 
 -- IV & Drug Delivery
-  ('IV Catheter', 'Intravenous catheter for vascular access', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
-  ('IV Administration Set', 'Tubing set for IV fluid administration', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
-  ('IV Extension Set', 'Extension tubing for IV access', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Syringe', 'Disposable syringe for medication administration', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Needle', 'Disposable hypodermic needle', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
-  ('Alcohol Prep Pad', 'Disposable alcohol prep pad for injection site cleaning', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
-  ('IV Securement Device', 'Device for securing IV catheters', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
-  ('IV Start Kit', 'Complete kit for IV catheter insertion', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW())
 ON CONFLICT DO NOTHING;
 
 -- =========================

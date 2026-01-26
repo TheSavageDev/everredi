@@ -24,13 +24,16 @@ export interface InventoryItem {
   locationName?: string;
   kitId?: string; // Optional: if this item belongs to a specific kit
   kitName?: string; // Optional: name of the kit this item belongs to
-  quantity: number;
+  // Quantity fields - actual_quantity for actual items, required_quantity for requirements
+  actualQuantity: number; // Actual quantity on hand (for actual items)
+  requiredQuantity?: number; // Required quantity (for kit items, both requirements and actual items)
+  lotCode?: string; // Lot/batch identifier (stored directly on inventory_item)
   expirationDate?: Date;
   purchaseDate?: Date;
   purchasePrice?: number;
   supplier?: string;
   notes?: string;
-  status: 'active' | 'expired' | 'used' | 'disposed';
+  status: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
   sentNotifications?: string[]; // Array of days for which notifications have been sent (e.g., ['60', '30', '10', '1'])
   customFields?: Record<string, string | number | boolean | null>; // Custom field values keyed by fieldId
   createdAt: Date;
@@ -39,23 +42,36 @@ export interface InventoryItem {
 
 // Helper function to convert PostgreSQL row to InventoryItem
 function rowToInventoryItem(row: any): InventoryItem {
+  // Read actual_quantity and required_quantity directly from database columns
+  const actualQty =
+    row.actual_quantity !== undefined && row.actual_quantity !== null
+      ? row.actual_quantity
+      : row.is_requirement
+        ? 0
+        : 0; // Default to 0 if not set
+  const requiredQty =
+    row.required_quantity !== undefined && row.required_quantity !== null
+      ? row.required_quantity
+      : undefined;
+
   return {
     id: row.id,
     userId: row.user_id,
     supplyId: row.supply_id,
-    supplyName: row.supply_name,
+    supplyName: row.supply_name || row.freeform_name,
     supplyCategoryId: row.supply_category_id,
-    locationId: row.location_id,
+    locationId: row.location_id || '',
     locationName: row.location_name,
     kitId: row.kit_id,
     kitName: row.kit_name,
-    quantity: row.quantity,
+    // Use actual_quantity and required_quantity directly
+    actualQuantity: actualQty,
+    requiredQuantity: requiredQty,
+    lotCode: row.lot_code, // Lot/batch identifier
     expirationDate: row.expiration_date
       ? new Date(row.expiration_date)
       : undefined,
-    purchaseDate: row.purchase_date
-      ? new Date(row.purchase_date)
-      : undefined,
+    purchaseDate: row.purchase_date ? new Date(row.purchase_date) : undefined,
     purchasePrice: row.purchase_price,
     supplier: row.supplier,
     notes: row.notes,
@@ -107,103 +123,71 @@ export class InventoryService {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
 
-    // Try new schema first (with inventory_lots), fall back to old schema if table doesn't exist
-    let data: any[] | null = null;
-    let error: any = null;
-    
-    // Try to get inventory items with lots (new schema)
-    const result = await this.supabase
+    // Get inventory items (no lots aggregation needed - each item is already a single lot)
+    const { data, error } = await this.supabase
       .from('inventory_items')
-      .select(`
-        *,
-        inventory_lots(
-          id,
-          quantity_units,
-          expiration_date,
-          purchase_date,
-          purchase_price,
-          supplier,
-          status
-        )
-      `)
+      .select('*')
       .eq('tenant_id', tenant.id)
       .eq('is_requirement', false); // Only get actual items, not requirements
-    
-    data = result.data;
-    error = result.error;
-    
-    // If error is about missing relationship/table, fall back to old schema
-    if (error && (error.message?.includes('relationship') || error.message?.includes('schema cache') || error.code === 'PGRST202')) {
-      logger.warn('inventory_lots table not found, using old schema');
-      // Fall back to old schema (no lots)
-      const oldResult = await this.supabase
-        .from('inventory_items')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .eq('is_requirement', false);
-      
-      if (oldResult.error) {
-        logger.error(`Error fetching inventory items: ${oldResult.error.message}`);
-        throw new Error(`Failed to get inventory items: ${oldResult.error.message}`);
-      }
-      
-      // Return items in old format (no lots aggregation)
-      return (oldResult.data || []).map((item: any) => rowToInventoryItem(item));
-    }
 
     if (error) {
       logger.error(`Error fetching inventory items: ${error.message}`);
       throw new Error(`Failed to get inventory items: ${error.message}`);
     }
 
-    // Aggregate quantities from lots and use earliest expiration
-    return (data || []).map((item: any) => {
-      const lots = item.inventory_lots || [];
-      const activeLots = lots.filter((lot: any) => lot.status === 'active');
-      
-      // Calculate total quantity from active lots
-      const totalQuantity = activeLots.reduce(
-        (sum: number, lot: any) => sum + (lot.quantity_units || 0),
-        0
+    // Check for expired items and update their status
+    const now = new Date();
+    const lifecycleStates = ['used', 'disposed', 'expired'];
+    const expiredUpdates: Array<{ id: string; supply_name: string }> = [];
+
+    for (const item of data || []) {
+      if (
+        item.expiration_date &&
+        new Date(item.expiration_date) < now &&
+        !lifecycleStates.includes(item.status as string)
+      ) {
+        expiredUpdates.push({ id: item.id, supply_name: item.supply_name });
+      }
+    }
+
+    // Batch update expired items
+    if (expiredUpdates.length > 0) {
+      for (const update of expiredUpdates) {
+        try {
+          await this.supabase
+            .from('inventory_items')
+            .update({
+              status: 'expired',
+              updated_at: now.toISOString(),
+            })
+            .eq('id', update.id)
+            .eq('tenant_id', tenant.id);
+        } catch (updateError) {
+          logger.warn(
+            `Failed to update expired status for item ${update.id}: ${updateError}`,
+          );
+        }
+      }
+      logger.log(
+        `Updated ${expiredUpdates.length} items to expired status during getInventoryItems`,
       );
-      
-      // Get earliest expiration date from active lots
-      const expirationDates = activeLots
-        .map((lot: any) => lot.expiration_date)
-        .filter((date: any) => date)
-        .sort();
-      const earliestExpiration = expirationDates.length > 0 
-        ? new Date(expirationDates[0]) 
-        : undefined;
-      
-      // Use first lot's purchase info
-      const firstLot = activeLots[0] || lots[0];
-      const purchaseDate = firstLot?.purchase_date ? new Date(firstLot.purchase_date) : undefined;
-      const purchasePrice = firstLot?.purchase_price;
-      const supplier = firstLot?.supplier;
-      
-      // Determine status: if all lots are expired/used/disposed, item is expired/used/disposed
-      const allExpired = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'expired');
-      const allUsed = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'used');
-      const allDisposed = activeLots.length === 0 && lots.some((lot: any) => lot.status === 'disposed');
-      
-      let status = item.status;
-      if (allExpired) status = 'expired';
-      else if (allUsed) status = 'used';
-      else if (allDisposed) status = 'disposed';
-      else if (activeLots.length > 0) status = 'active';
-      
-      const baseItem = rowToInventoryItem(item);
-      return {
-        ...baseItem,
-        quantity: totalQuantity, // Aggregate from lots
-        expirationDate: earliestExpiration,
-        purchaseDate,
-        purchasePrice,
-        supplier,
-        status,
-      };
-    });
+    }
+
+    // Re-fetch items to get updated statuses
+    const { data: updatedData, error: refetchError } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false);
+
+    if (refetchError) {
+      logger.error(`Error refetching inventory items: ${refetchError.message}`);
+      // Fall back to original data if refetch fails
+      return (data || []).map((item: any) => rowToInventoryItem(item));
+    }
+
+    // Convert rows to InventoryItem - columns are already populated by database
+    return (updatedData || []).map((item: any) => rowToInventoryItem(item));
   }
 
   async getInventoryItem(
@@ -212,17 +196,49 @@ export class InventoryService {
   ): Promise<InventoryItem> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
+    // Allow both requirements and actual items - kit items can be requirements
     const { data, error } = await this.supabase
       .from('inventory_items')
       .select('*')
       .eq('id', itemId)
       .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false) // Only get actual items, not requirements
       .single();
 
     if (error || !data) {
       throw new NotFoundException('Inventory item not found');
+    }
+
+    // Check if item has expired and update status if needed
+    const lifecycleStates = ['used', 'disposed', 'expired'];
+    const currentStatus = data.status as string;
+
+    if (
+      data.expiration_date &&
+      new Date(data.expiration_date) < new Date() &&
+      !lifecycleStates.includes(currentStatus)
+    ) {
+      try {
+        const { data: updatedData, error: updateError } = await this.supabase
+          .from('inventory_items')
+          .update({
+            status: 'expired',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', itemId)
+          .eq('tenant_id', tenant.id)
+          .select()
+          .single();
+
+        if (!updateError && updatedData) {
+          logger.log(`Updated item ${itemId} to expired status`);
+          return rowToInventoryItem(updatedData);
+        }
+      } catch (updateError) {
+        logger.warn(
+          `Failed to update expired status for item ${itemId}: ${updateError}`,
+        );
+      }
     }
 
     return rowToInventoryItem(data);
@@ -247,8 +263,8 @@ export class InventoryService {
    * const item = await inventoryService.createInventoryItem('user123', {
    *   supplyName: 'Bandages',
    *   locationId: 'loc123',
-   *   quantity: 10,
-   *   status: 'active',
+   *   actualQuantity: 10,
+   *   status: 'complete',
    *   expirationDate: '2025-12-31'
    * });
    * ```
@@ -265,14 +281,12 @@ export class InventoryService {
     if (!isPremium) {
       // Get user's tenant for scoping
       const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-      
+
       const { count, error: countError } = await this.supabase
         .from('inventory_items')
         .select('*', { count: 'exact', head: true })
         .eq('tenant_id', tenant.id)
-        .eq('is_requirement', false) // Only count actual items, not requirements
-        .eq('status', 'active');
-
+        .eq('is_requirement', false); // Only count actual items, not requirements
       if (countError) {
         logger.error(`Error counting inventory items: ${countError.message}`);
       }
@@ -297,10 +311,10 @@ export class InventoryService {
 
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
     // Use kitId directly (containers table was removed)
     let kitId = (itemData as any).kitId || (itemData as any).containerId;
-    
+
     // If no kitId and requireKit is true, create a default kit for user's tenant
     // Note: kit_id can be NULL for standalone inventory (not in a kit)
     if (!kitId && (itemData as any).requireKit) {
@@ -312,7 +326,7 @@ export class InventoryService {
         .eq('name', 'Default Kit')
         .is('deleted_at', null)
         .single();
-      
+
       if (defaultKit) {
         kitId = defaultKit.id;
       } else {
@@ -326,14 +340,41 @@ export class InventoryService {
           })
           .select()
           .single();
-        
+
         if (newKit) {
           kitId = newKit.id;
         }
       }
     }
 
-    // Create inventory_item (aggregate) - note: quantity is now in lots
+    // Create inventory_item - all lot data stored directly on item
+    // Use actualQuantity instead of quantity
+    const actualQty =
+      itemData.actualQuantity !== undefined ? itemData.actualQuantity : 0;
+
+    // Calculate status based on quantities
+    // Only auto-calculate for fulfillment states, preserve lifecycle states (used, disposed, expired)
+    let calculatedStatus: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
+    const lifecycleStates = ['used', 'disposed', 'expired'];
+    if (
+      itemData.status &&
+      ['complete', 'partial', 'missing', 'used', 'disposed', 'expired'].includes(itemData.status)
+    ) {
+      calculatedStatus = itemData.status;
+    } else if (itemData.requiredQuantity !== undefined) {
+      // For kit items with required_quantity
+      if (actualQty >= itemData.requiredQuantity) {
+        calculatedStatus = 'complete';
+      } else if (actualQty > 0) {
+        calculatedStatus = 'partial';
+      } else {
+        calculatedStatus = 'missing';
+      }
+    } else {
+      // For standalone items (no required_quantity)
+      calculatedStatus = actualQty > 0 ? 'complete' : 'missing';
+    }
+
     const insertData: any = {
       tenant_id: tenant.id,
       kit_id: kitId || null, // NULL for standalone inventory
@@ -344,7 +385,14 @@ export class InventoryService {
       location_id: itemData.locationId,
       location_name: itemData.locationName,
       is_requirement: false, // This is an actual item, not a requirement
-      status: itemData.status || 'active',
+      status: calculatedStatus,
+      expiration_date: expirationDate ? expirationDate.toISOString() : null,
+      purchase_date: purchaseDate ? purchaseDate.toISOString() : null,
+      purchase_price: itemData.purchasePrice,
+      supplier: itemData.supplier,
+      lot_code: (itemData as any).lotCode || null,
+      actual_quantity: actualQty,
+      required_quantity: itemData.requiredQuantity,
       notes: itemData.notes,
       custom_fields: itemData.customFields,
       created_at: now.toISOString(),
@@ -356,48 +404,37 @@ export class InventoryService {
       Object.entries(insertData).filter(([, value]) => value !== undefined),
     );
 
+    // If item is in a kit, lookup required_quantity from matching requirement
+    if (kitId && !itemData.requiredQuantity) {
+      const { data: requirement } = await this.supabase
+        .from('inventory_items')
+        .select('required_quantity')
+        .eq('kit_id', kitId)
+        .eq('tenant_id', tenant.id)
+        .eq('is_requirement', true)
+        .or(
+          itemData.supplyId
+            ? `supply_id.eq.${itemData.supplyId}`
+            : `freeform_name.eq.${itemData.supplyName}`,
+        )
+        .single();
+
+      if (requirement && requirement.required_quantity) {
+        filteredData.required_quantity = requirement.required_quantity;
+      }
+    }
+
     const { data: inventoryItem, error: itemError } = await this.supabase
       .from('inventory_items')
       .insert(filteredData)
       .select()
       .single();
 
-    if (itemError) {
-      throw new Error(`Failed to create inventory item: ${itemError.message}`);
+    if (itemError || !inventoryItem) {
+      throw new Error(
+        `Failed to create inventory item: ${itemError?.message || 'Unknown error'}`,
+      );
     }
-
-    // Create inventory_lot with quantity and expiration
-    if (inventoryItem) {
-      const lotData: any = {
-        inventory_item_id: inventoryItem.id,
-        quantity_units: itemData.quantity,
-        expiration_date: expirationDate ? expirationDate.toISOString().split('T')[0] : null,
-        purchase_date: purchaseDate ? purchaseDate.toISOString().split('T')[0] : null,
-        purchase_price: itemData.purchasePrice,
-        supplier: itemData.supplier,
-        status: itemData.status === 'expired' ? 'expired' : 
-                itemData.status === 'used' ? 'used' :
-                itemData.status === 'disposed' ? 'disposed' : 'active',
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-      };
-
-      const { error: lotError } = await this.supabase
-        .from('inventory_lots')
-        .insert(lotData);
-
-      if (lotError) {
-        logger.error(`Failed to create inventory lot: ${lotError.message}`);
-      }
-    }
-
-    // Return in old format for backward compatibility
-    const result = {
-      ...rowToInventoryItem(inventoryItem),
-      quantity: itemData.quantity,
-      expirationDate,
-      purchaseDate,
-    };
 
     // If item belongs to a kit, check if it's an OSHA kit and recalculate compliance
     if (kitId && this.userKitsService) {
@@ -411,7 +448,8 @@ export class InventoryService {
       }
     }
 
-    return result;
+    // Return item with all fields populated
+    return rowToInventoryItem(inventoryItem);
   }
 
   async updateInventoryItem(
@@ -421,7 +459,7 @@ export class InventoryService {
   ): Promise<InventoryItem> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
     // Get current item to check expiration date changes
     const { data: currentItem, error: fetchError } = await this.supabase
       .from('inventory_items')
@@ -457,14 +495,70 @@ export class InventoryService {
     if (updates.kitId !== undefined) processedUpdates.kit_id = updates.kitId;
     if (updates.kitName !== undefined)
       processedUpdates.kit_name = updates.kitName;
-    if (updates.quantity !== undefined)
-      processedUpdates.quantity = updates.quantity;
+    if (updates.actualQuantity !== undefined) {
+      processedUpdates.actual_quantity = updates.actualQuantity;
+    }
+    if (updates.requiredQuantity !== undefined) {
+      processedUpdates.required_quantity = updates.requiredQuantity;
+    }
+    if (updates.lotCode !== undefined)
+      processedUpdates.lot_code = updates.lotCode;
     if (updates.purchasePrice !== undefined)
       processedUpdates.purchase_price = updates.purchasePrice;
     if (updates.supplier !== undefined)
       processedUpdates.supplier = updates.supplier;
     if (updates.notes !== undefined) processedUpdates.notes = updates.notes;
-    if (updates.status !== undefined) processedUpdates.status = updates.status;
+
+    // Calculate status based on quantities if status is not explicitly provided
+    // or if quantities have changed
+    const actualQty =
+      updates.actualQuantity !== undefined
+        ? Number(updates.actualQuantity)
+        : Number(currentItem.actual_quantity) || 0;
+    const requiredQty =
+      updates.requiredQuantity !== undefined
+        ? updates.requiredQuantity !== null
+          ? Number(updates.requiredQuantity)
+          : null
+        : currentItem.required_quantity !== null && currentItem.required_quantity !== undefined
+          ? Number(currentItem.required_quantity)
+          : null;
+
+    // Only auto-calculate status for fulfillment states, preserve lifecycle states
+    const lifecycleStates = ['used', 'disposed', 'expired'];
+    const currentStatus = currentItem.status as string;
+
+    const validStatuses = ['complete', 'partial', 'missing', 'used', 'disposed', 'expired'];
+    
+    if (updates.status !== undefined) {
+      // Status explicitly provided - validate and use it
+      if (!validStatuses.includes(updates.status)) {
+        throw new Error(
+          `Invalid status value: ${updates.status}. Must be one of: ${validStatuses.join(', ')}`,
+        );
+      }
+      processedUpdates.status = updates.status;
+    } else if (
+      (updates.actualQuantity !== undefined || updates.requiredQuantity !== undefined) &&
+      !lifecycleStates.includes(currentStatus)
+    ) {
+      // Quantities changed and current status is not a lifecycle state - recalculate status
+      let calculatedStatus: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
+      if (requiredQty !== undefined && requiredQty !== null) {
+        // For kit items with required_quantity
+        if (actualQty >= requiredQty) {
+          calculatedStatus = 'complete';
+        } else if (actualQty > 0) {
+          calculatedStatus = 'partial';
+        } else {
+          calculatedStatus = 'missing';
+        }
+      } else {
+        // For standalone items (no required_quantity)
+        calculatedStatus = actualQty > 0 ? 'complete' : 'missing';
+      }
+      processedUpdates.status = calculatedStatus;
+    }
     if (updates.customFields !== undefined)
       processedUpdates.custom_fields = updates.customFields;
 
@@ -512,6 +606,10 @@ export class InventoryService {
       .single();
 
     if (error) {
+      logger.error(
+        `Failed to update inventory item ${itemId}: ${error.message}`,
+        { error, updateData, currentItem: currentItem.id },
+      );
       throw new Error(`Failed to update inventory item: ${error.message}`);
     }
 
@@ -536,7 +634,7 @@ export class InventoryService {
   async deleteInventoryItem(userId: string, itemId: string): Promise<void> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
     // Get the item first to check if it belongs to a kit
     const { data: item, error: fetchError } = await this.supabase
       .from('inventory_items')
@@ -579,7 +677,7 @@ export class InventoryService {
   ): Promise<InventoryItem[]> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
     const { data, error } = await this.supabase
       .from('inventory_items')
       .select('*')
@@ -607,7 +705,7 @@ export class InventoryService {
   ): Promise<InventoryItem[]> {
     // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    
+
     const thresholdDate = new Date(
       Date.now() + (days || 30) * 24 * 60 * 60 * 1000,
     );
@@ -618,7 +716,6 @@ export class InventoryService {
       .select('*')
       .eq('tenant_id', tenant.id)
       .eq('is_requirement', false) // Only get actual items, not requirements
-      .eq('status', 'active')
       .gte('expiration_date', now.toISOString())
       .lte('expiration_date', thresholdDate.toISOString())
       .order('expiration_date', { ascending: true });

@@ -24,7 +24,7 @@ export interface AiRecommendation {
   recommendedItems: Array<{
     supplyId: string;
     supplyName: string;
-    quantity: number;
+    requiredQuantity: number;
     reason?: string;
   }>;
   confidenceScore: number;
@@ -148,7 +148,7 @@ Please provide a JSON array of recommended items with the following structure:
 [
   {
     "supplyName": "Item name",
-    "quantity": number,
+    "requiredQuantity": number,
     "reason": "Why this item is needed"
   }
 ]

@@ -146,7 +146,7 @@ src/
 
 - CRUD operations for inventory items
 - Consolidated model: single `inventory_items` table handles both kit items and inventory
-- Expiration date tracking via `inventory_lots` table
+- Expiration date and lot code tracking stored directly on `inventory_items` (no separate lots table)
 - Automatic expiration notifications (configurable warning days)
 - Purchase date tracking
 

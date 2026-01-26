@@ -35,9 +35,11 @@ The `kit_items` table has been consolidated into `inventory_items`. All code ref
   supply_id: UUID (nullable)
   freeform_name: string (nullable)
   supply_name: string
-  quantity: number
+  actual_quantity: number  // Actual quantity on hand
+  required_quantity?: number  // Required quantity (for kit items)
+  lot_code?: string  // Lot/batch identifier
   is_requirement: boolean (true = requirement/placeholder)
-  status: 'active' | 'expired' | 'used' | 'disposed' | 'missing'
+  status: 'complete' | 'partial' | 'missing' // Auto-calculated based on quantities
   // ... other inventory fields
 }
 ```
@@ -70,8 +72,8 @@ The `kit_items` table has been consolidated into `inventory_items`. All code ref
 ### 2. `api/src/compliance/compliance.service.ts`
 
 **Update:**
-- Line 127-130: Query `inventory_items` instead of `kit_items`
-- Calculate `actual_quantity` from `inventory_lots` or `quantity` field
+- Query `inventory_items` instead of `kit_items`
+- Read `actual_quantity` and `required_quantity` directly from `inventory_items` columns
 - Use `is_requirement = true` for requirements
 
 ### 3. `api/src/bulk/bulk-operations.service.ts`
@@ -89,8 +91,8 @@ The `kit_items` table has been consolidated into `inventory_items`. All code ref
 1. **Update queries** to use `inventory_items` table
 2. **Add `is_requirement` flag** where appropriate (requirements vs actual items)
 3. **Use `kit_id`** instead of `user_kit_id` or `kit_container_id`
-4. **Calculate `actual_quantity`** from `inventory_lots` or use `quantity` field directly
-5. **Update status calculation** based on `quantity` vs `required_quantity` (for requirements)
+4. **Read `actual_quantity` and `required_quantity`** directly from `inventory_items` columns (no aggregation needed)
+5. **Update status calculation** based on `actual_quantity` vs `required_quantity`
 
 ## Example Migration
 
@@ -107,14 +109,14 @@ const { data: kitItems } = await this.supabase
 // Get requirements (is_requirement = true)
 const { data: requirements } = await this.supabase
   .from('inventory_items')
-  .select('*, inventory_lots(*)')
+  .select('*')
   .eq('kit_id', kitId)
   .eq('is_requirement', true);
 
 // Get actual items (is_requirement = false)
 const { data: actualItems } = await this.supabase
   .from('inventory_items')
-  .select('*, inventory_lots(*)')
+  .select('*')
   .eq('kit_id', kitId)
   .eq('is_requirement', false);
 ```
@@ -122,6 +124,8 @@ const { data: actualItems } = await this.supabase
 ## Status Calculation
 
 For requirements, calculate status based on:
-- `required_quantity` = `quantity` field (for requirements)
-- `actual_quantity` = sum of `inventory_lots.quantity_units` where status = 'active' and not expired
+- `required_quantity` = read directly from `inventory_items.required_quantity` column
+- `actual_quantity` = read directly from `inventory_items.actual_quantity` column (no aggregation needed)
 - Status: 'complete' if actual >= required, 'partial' if actual > 0, 'missing' otherwise
+
+**Note**: `inventory_lots` table has been removed. Lot data is now stored directly on `inventory_items`, and each lot is a separate inventory item.

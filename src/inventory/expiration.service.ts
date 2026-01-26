@@ -21,7 +21,6 @@ export class ExpirationService {
         .from('inventory_items')
         .select('*')
         .eq('user_id', userId)
-        .eq('status', 'active')
         .gte('expiration_date', now.toISOString())
         .lte('expiration_date', thresholdDate.toISOString())
         .order('expiration_date', { ascending: true });

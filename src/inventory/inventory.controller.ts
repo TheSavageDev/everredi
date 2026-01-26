@@ -72,19 +72,38 @@ export class InventoryController {
       supplyName?: string;
       supplyCategoryId?: string;
       locationId?: string;
-      quantity?: number;
+      quantity?: number; // Legacy field name - maps to actualQuantity
+      actualQuantity?: number;
+      requiredQuantity?: number;
       expirationDate?: string;
       purchaseDate?: string;
       purchasePrice?: number;
       supplier?: string;
       notes?: string;
       status?: string;
+      lotCode?: string;
     }>,
   ) {
+    // Map quantity to actualQuantity for backward compatibility
+    // Also convert date strings to Date objects
+    const mappedUpdates: any = { ...updates };
+    if (updates.quantity !== undefined && updates.actualQuantity === undefined) {
+      mappedUpdates.actualQuantity = updates.quantity;
+      delete mappedUpdates.quantity;
+    }
+    
+    // Convert date strings to Date objects if provided
+    if (updates.expirationDate !== undefined && typeof updates.expirationDate === 'string') {
+      mappedUpdates.expirationDate = new Date(updates.expirationDate);
+    }
+    if (updates.purchaseDate !== undefined && typeof updates.purchaseDate === 'string') {
+      mappedUpdates.purchaseDate = new Date(updates.purchaseDate);
+    }
+
     const item = await this.inventoryService.updateInventoryItem(
       user.uid,
       id,
-      updates as Partial<InventoryItem>,
+      mappedUpdates as Partial<InventoryItem>,
     );
     return {
       success: true,
@@ -148,6 +167,20 @@ export class InventoryController {
       success: true,
       data: items,
       message: 'Expiring items retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get(':id')
+  async getInventoryItem(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+  ) {
+    const item = await this.inventoryService.getInventoryItem(user.uid, id);
+    return {
+      success: true,
+      data: item,
+      message: 'Inventory item retrieved successfully',
       timestamp: new Date().toISOString(),
     };
   }

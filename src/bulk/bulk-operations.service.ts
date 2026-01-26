@@ -42,7 +42,7 @@ export class BulkOperationsService {
     interface ImportRow {
       supplyName?: string;
       locationId?: string;
-      quantity?: number | string;
+      actualQuantity?: number | string;
       status?: string;
       expirationDate?: string;
       purchaseDate?: string;
@@ -57,9 +57,13 @@ export class BulkOperationsService {
       const row = jsonData[i] as ImportRow;
       try {
         // Validate required fields
-        if (!row.supplyName || !row.locationId || row.quantity === undefined) {
+        if (
+          !row.supplyName ||
+          !row.locationId ||
+          row.actualQuantity === undefined
+        ) {
           throw new Error(
-            'Missing required fields: supplyName, locationId, quantity',
+            'Missing required fields: supplyName, locationId, actualQuantity',
           );
         }
 
@@ -77,13 +81,12 @@ export class BulkOperationsService {
         > = {
           supplyName: row.supplyName,
           locationId: row.locationId,
-          quantity:
-            typeof row.quantity === 'number'
-              ? row.quantity
-              : parseInt(String(row.quantity), 10) || 0,
-          status:
-            (row.status as 'active' | 'expired' | 'used' | 'disposed') ||
-            'active',
+          actualQuantity:
+            typeof row.actualQuantity === 'number'
+              ? row.actualQuantity
+              : parseInt(String(row.actualQuantity), 10) || 0,
+          // Status will be calculated based on quantities in createInventoryItem
+          status: 'complete', // Default, will be recalculated
           expirationDate,
           purchaseDate,
           purchasePrice:
@@ -131,7 +134,7 @@ export class BulkOperationsService {
       supplyName: item.supply_name,
       supplyId: item.supply_id,
       locationId: item.location_id,
-      quantity: item.quantity,
+      actualQuantity: item.actual_quantity ?? 0,
       status: item.status,
       expirationDate: item.expiration_date
         ? new Date(item.expiration_date).toISOString()
@@ -208,7 +211,9 @@ export class BulkOperationsService {
         if (request.updates.expirationDate !== undefined) {
           const expirationDateValue = request.updates.expirationDate;
           if (typeof expirationDateValue === 'string') {
-            updateData.expiration_date = new Date(expirationDateValue).toISOString();
+            updateData.expiration_date = new Date(
+              expirationDateValue,
+            ).toISOString();
           } else if (expirationDateValue instanceof Date) {
             updateData.expiration_date = expirationDateValue.toISOString();
           }
@@ -252,7 +257,7 @@ export class BulkOperationsService {
     > = {
       name: newName || `${kit.name} (Copy)`,
       locationId: kit.locationId,
-      status: 'active',
+      status: 'active', // Default status for new kits
       notes: kit.notes,
     };
 
@@ -260,12 +265,14 @@ export class BulkOperationsService {
 
     // Copy items
     for (const item of items) {
+      // When duplicating a kit, we want to copy the requirements
+      // Actual items will be created separately by users
       await this.userKitsService.createKitItemInstance(userId, newKit.id, {
-        supplyId: item.supplyId,
-        supplyName: item.supplyName,
-        requiredQuantity: item.requiredQuantity,
+        supplyId: item.supplyId || '', // Required field, use empty string if undefined
+        supplyName: item.supplyName || '',
+        requiredQuantity: item.requiredQuantity ?? 0, // Use requiredQuantity if available, fallback to quantity
         notes: item.notes,
-        inventoryItemId: item.inventoryItemId,
+        // Don't pass inventoryItemId - we're creating a new kit, so items should be created fresh
       });
     }
 

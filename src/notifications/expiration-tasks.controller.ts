@@ -87,16 +87,8 @@ export class ExpirationTasksController {
           };
         }
 
-        // Check if item is still active
-        if (item.status !== 'active') {
-          logger.warn(
-            `Item ${payload.itemId} is not active (status: ${item.status}), skipping notification`,
-          );
-          return {
-            success: true,
-            message: 'Item not active, notification skipped',
-          };
-        }
+        // Status is now based on quantities, not lifecycle state
+        // Items with expiration dates can receive notifications regardless of status
 
         // Calculate actual days until expiration
         const now = new Date();

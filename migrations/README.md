@@ -29,7 +29,7 @@ The `inventory_items` table consolidates both kit items and inventory:
 
 - **Items in kits**: `kit_id` is set (not NULL)
 - **Items not in kits**: `kit_id` is NULL
-- **Requirements/placeholders**: `is_requirement = true` and/or `quantity = 0`
+- **Requirements/placeholders**: `is_requirement = true`, `actual_quantity = 0`, `required_quantity > 0`
 - **All inventory tracking**: expiration, purchase info, custom fields, etc.
 
 This eliminates the dual relationship problem between `kit_items` and `inventory_items`.
@@ -105,6 +105,23 @@ These tables were removed during schema evolution:
 - `kit_items` - Merged into `inventory_items` table
 - `shared_kits` - Replaced by `kit_acl` table
 - `kit_requirements` - Merged into `inventory_items` with `is_requirement` flag
+- `inventory_lots` - Removed; lot data now stored directly on `inventory_items` (each lot is a separate item)
+
+## Deprecated Columns (Removed in Migrations)
+
+- `inventory_items.quantity` - Removed in migration 007, replaced with:
+  - `actual_quantity` - Actual quantity on hand (for actual items)
+  - `required_quantity` - Required quantity (for kit items, both requirements and actual items)
+
+## Status Field Changes
+
+- `inventory_items.status` - Updated in migration 008:
+  - **Old values**: 'active', 'expired', 'used', 'disposed', 'missing' (lifecycle states)
+  - **New values**: 'complete', 'partial', 'missing' (fulfillment states)
+  - Status is now auto-calculated based on `actual_quantity` vs `required_quantity`:
+    - `complete`: `actual_quantity >= required_quantity` (or `actual_quantity > 0` for standalone items)
+    - `partial`: `actual_quantity > 0` but less than `required_quantity`
+    - `missing`: `actual_quantity = 0`
 
 ## Schema Documentation
 

@@ -727,4 +727,156 @@ export class InventoryService {
 
     return (data || []).map(rowToInventoryItem);
   }
+
+  async getExpiredItems(userId: string): Promise<InventoryItem[]> {
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false) // Only get actual items, not requirements
+      .eq('status', 'expired')
+      .order('expiration_date', { ascending: true });
+
+    if (error) {
+      logger.error(`Error fetching expired items: ${error.message}`);
+      return [];
+    }
+
+    return (data || []).map(rowToInventoryItem);
+  }
+
+  async getLowQuantityItems(
+    userId: string,
+    thresholdPercent: number = 10,
+  ): Promise<InventoryItem[]> {
+    // Get user's tenant
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+
+    // Get all inventory items that have required_quantity > 0 OR are in kits
+    // First, get items that already have required_quantity set
+    const { data: itemsWithRequiredQty, error: error1 } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false) // Only get actual items, not requirements
+      .gt('required_quantity', 0)
+      .not('required_quantity', 'is', null);
+
+    if (error1) {
+      logger.error(`Error fetching items with required_quantity: ${error1.message}`);
+    }
+
+    // Also get items in kits that might not have required_quantity set yet
+    const { data: itemsInKits, error: error2 } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('is_requirement', false)
+      .not('kit_id', 'is', null)
+      .or('required_quantity.is.null,required_quantity.eq.0');
+
+    if (error2) {
+      logger.error(`Error fetching items in kits: ${error2.message}`);
+    }
+
+    // Combine and deduplicate by id
+    const allItems = new Map<string, any>();
+    (itemsWithRequiredQty || []).forEach((item) => {
+      allItems.set(item.id, item);
+    });
+    (itemsInKits || []).forEach((item) => {
+      if (!allItems.has(item.id)) {
+        allItems.set(item.id, item);
+      }
+    });
+
+    const itemsArray = Array.from(allItems.values());
+
+    if (itemsArray.length === 0) {
+      logger.log(`No items with required_quantity or in kits found for user ${userId}`);
+      return [];
+    }
+
+    // For items without required_quantity, try to get it from the matching requirement
+    // Batch lookup requirements for all kits
+    const kitIds = [...new Set(itemsArray.map((item) => item.kit_id).filter(Boolean))];
+    const requirementsMap = new Map<string, number>();
+
+    if (kitIds.length > 0) {
+      const { data: requirements, error: reqError } = await this.supabase
+        .from('inventory_items')
+        .select('kit_id, supply_id, freeform_name, required_quantity')
+        .eq('tenant_id', tenant.id)
+        .eq('is_requirement', true)
+        .in('kit_id', kitIds)
+        .gt('required_quantity', 0);
+
+      if (reqError) {
+        logger.warn(`Error fetching requirements: ${reqError.message}`);
+      } else if (requirements) {
+        // Build a map: key = kit_id + supply_id/freeform_name, value = required_quantity
+        requirements.forEach((req) => {
+          const key = req.supply_id
+            ? `${req.kit_id}:supply:${req.supply_id}`
+            : `${req.kit_id}:freeform:${req.freeform_name}`;
+          requirementsMap.set(key, req.required_quantity);
+        });
+      }
+    }
+
+    // Enrich items with required_quantity from requirements if missing
+    const enrichedItems = itemsArray.map((item) => {
+      if (item.required_quantity && item.required_quantity > 0) {
+        return item;
+      }
+
+      // Try to get from requirements map
+      if (item.kit_id) {
+        const key = item.supply_id
+          ? `${item.kit_id}:supply:${item.supply_id}`
+          : `${item.kit_id}:freeform:${item.freeform_name}`;
+        const reqQty = requirementsMap.get(key);
+        if (reqQty) {
+          item.required_quantity = reqQty;
+        }
+      }
+
+      return item;
+    });
+
+    // Filter items where actualQuantity < requiredQuantity AND percentage remaining <= threshold
+    const threshold = thresholdPercent / 100;
+    const lowQuantityItems = enrichedItems.filter((item) => {
+      const actualQty = item.actual_quantity || 0;
+      const requiredQty = item.required_quantity || 0;
+      
+      // Must have a required quantity
+      if (requiredQty === 0) return false;
+      
+      // Only show items that are actually below required (not at or above)
+      if (actualQty >= requiredQty) return false;
+      
+      // Calculate percentage remaining
+      const percentRemaining = actualQty / requiredQty;
+      
+      // Show if percentage remaining is at or below threshold (e.g., 10% or less remaining)
+      return percentRemaining <= threshold;
+    });
+
+    // Sort by percentage remaining (lowest first)
+    lowQuantityItems.sort((a, b) => {
+      const aPercent = (a.actual_quantity || 0) / (a.required_quantity || 1);
+      const bPercent = (b.actual_quantity || 0) / (b.required_quantity || 1);
+      return aPercent - bPercent;
+    });
+
+    logger.log(
+      `Low quantity check: Found ${lowQuantityItems.length} low quantity items (threshold: ${thresholdPercent}%) out of ${enrichedItems.length} items checked (${itemsWithRequiredQty?.length || 0} with required_quantity, ${itemsInKits?.length || 0} in kits without)`,
+    );
+
+    return lowQuantityItems.map(rowToInventoryItem);
+  }
 }

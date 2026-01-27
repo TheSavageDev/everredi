@@ -171,6 +171,35 @@ export class InventoryController {
     };
   }
 
+  @Get('expired')
+  async getExpiredItems(@CurrentUser() user: { uid: string }) {
+    const items = await this.inventoryService.getExpiredItems(user.uid);
+    return {
+      success: true,
+      data: items,
+      message: 'Expired items retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('low-quantity')
+  async getLowQuantityItems(
+    @CurrentUser() user: { uid: string },
+    @Query('threshold') threshold?: string,
+  ) {
+    const thresholdNum = threshold ? parseFloat(threshold) : 10;
+    const items = await this.inventoryService.getLowQuantityItems(
+      user.uid,
+      thresholdNum,
+    );
+    return {
+      success: true,
+      data: items,
+      message: 'Low quantity items retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Get(':id')
   async getInventoryItem(
     @CurrentUser() user: { uid: string },

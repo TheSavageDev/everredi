@@ -203,6 +203,37 @@ export class UsersService {
     return rowToUser(data);
   }
 
+  /**
+   * List users for admin (paginated, optional email search).
+   */
+  async listUsers(filters?: {
+    limit?: number;
+    offset?: number;
+    emailSearch?: string;
+  }): Promise<User[]> {
+    const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 100);
+    const offset = Math.max(filters?.offset ?? 0, 0);
+
+    let query = this.supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (filters?.emailSearch?.trim()) {
+      query = query.ilike('email', `%${filters.emailSearch.trim()}%`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      this.logger.error(`Error listing users: ${error.message}`);
+      return [];
+    }
+
+    return (data || []).map(rowToUser);
+  }
+
   async searchUserByEmail(
     email: string,
   ): Promise<{ uid: string; email: string; displayName?: string } | null> {

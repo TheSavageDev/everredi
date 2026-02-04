@@ -2,6 +2,7 @@ import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
+import { EmailService } from '../email/email.service';
 import { UsersService } from '../users/users.service';
 
 export interface SupportTicket {
@@ -29,9 +30,7 @@ function rowToSupportTicket(row: any): SupportTicket {
     isPremium: row.is_premium || false,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
-    resolvedAt: row.resolved_at
-      ? new Date(row.resolved_at)
-      : undefined,
+    resolvedAt: row.resolved_at ? new Date(row.resolved_at) : undefined,
   };
 }
 
@@ -40,6 +39,7 @@ export class SupportService {
   constructor(
     @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly usersService: UsersService,
+    private readonly emailService: EmailService,
   ) {}
 
   async createTicket(
@@ -78,6 +78,22 @@ export class SupportService {
     }
 
     const ticket = rowToSupportTicket(data);
+
+    if (this.emailService.isConfigured()) {
+      const user = await this.usersService.getUserById(userId);
+      const userEmail = user?.email ?? '';
+      this.emailService
+        .sendSupportTicketNotification(
+          ticket.id,
+          ticketData.subject,
+          ticketData.message,
+          userEmail,
+        )
+        .catch(() => {
+          // Already logged in EmailService; ticket was created successfully
+        });
+    }
+
     return { ...ticket, isPremium };
   }
 

@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE } from '../config/supabase.provider';
 import { NotificationsService } from './notifications.service';
 import { PushNotificationService } from './push-notification.service';
+import { AdvancedNotificationsService } from './advanced-notifications.service';
 import type { ExpirationTaskPayload } from './cloud-tasks.service';
 
 const logger = new Logger('ExpirationTasksController');
@@ -21,6 +22,7 @@ export class ExpirationTasksController {
   constructor(
     private readonly notificationsService: NotificationsService,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly advancedNotificationsService: AdvancedNotificationsService,
     @Inject(SUPABASE) private readonly supabase: SupabaseClient,
   ) {}
 
@@ -138,13 +140,17 @@ export class ExpirationTasksController {
         sentAt: new Date(),
       });
 
-      // Send push notification
-      await this.pushNotificationService.sendExpirationNotification(
+      const pushEnabled = await this.advancedNotificationsService.isPushEnabled(
         payload.userId,
-        item.supply_name,
-        payload.daysUntilExpiration,
-        payload.itemId,
       );
+      if (pushEnabled) {
+        await this.pushNotificationService.sendExpirationNotification(
+          payload.userId,
+          item.supply_name,
+          payload.daysUntilExpiration,
+          payload.itemId,
+        );
+      }
 
       logger.log(
         `Successfully sent expiration notification for item ${payload.itemId}`,

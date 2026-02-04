@@ -22,6 +22,7 @@ export interface LowStockAlert {
   supplyName: string;
   minimumQuantity: number;
   isActive: boolean;
+  lastTriggeredAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +60,9 @@ function rowToLowStockAlert(row: any): LowStockAlert {
     supplyName: row.supply_name,
     minimumQuantity: row.minimum_quantity,
     isActive: row.is_active,
+    lastTriggeredAt: row.last_triggered_at
+      ? new Date(row.last_triggered_at)
+      : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -136,9 +140,12 @@ export class AdvancedNotificationsService {
       updated_at: new Date().toISOString(),
     };
 
-    if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
-    if (updates.daysBeforeExpiration !== undefined) updateData.days_before_expiration = updates.daysBeforeExpiration;
-    if (updates.alertLevel !== undefined) updateData.alert_level = updates.alertLevel;
+    if (updates.categoryId !== undefined)
+      updateData.category_id = updates.categoryId;
+    if (updates.daysBeforeExpiration !== undefined)
+      updateData.days_before_expiration = updates.daysBeforeExpiration;
+    if (updates.alertLevel !== undefined)
+      updateData.alert_level = updates.alertLevel;
     if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
 
     const { data, error } = await this.supabase
@@ -221,8 +228,10 @@ export class AdvancedNotificationsService {
     };
 
     if (updates.supplyId !== undefined) updateData.supply_id = updates.supplyId;
-    if (updates.supplyName !== undefined) updateData.supply_name = updates.supplyName;
-    if (updates.minimumQuantity !== undefined) updateData.minimum_quantity = updates.minimumQuantity;
+    if (updates.supplyName !== undefined)
+      updateData.supply_name = updates.supplyName;
+    if (updates.minimumQuantity !== undefined)
+      updateData.minimum_quantity = updates.minimumQuantity;
     if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
 
     const { data, error } = await this.supabase
@@ -250,6 +259,15 @@ export class AdvancedNotificationsService {
     if (error) {
       throw new Error(`Failed to delete low stock alert: ${error.message}`);
     }
+  }
+
+  /**
+   * Single source for "is push enabled" for a user (used by expiration and broadcast flows).
+   * Reads notification_preferences.push_enabled; defaults to true when no row exists.
+   */
+  async isPushEnabled(userId: string): Promise<boolean> {
+    const prefs = await this.getNotificationPreferences(userId);
+    return prefs?.pushEnabled ?? true;
   }
 
   async getNotificationPreferences(
@@ -289,12 +307,19 @@ export class AdvancedNotificationsService {
       updated_at: now.toISOString(),
     };
 
-    if (preferences.emailEnabled !== undefined) updateData.email_enabled = preferences.emailEnabled;
-    if (preferences.pushEnabled !== undefined) updateData.push_enabled = preferences.pushEnabled;
-    if (preferences.emailFrequency !== undefined) updateData.email_frequency = preferences.emailFrequency;
-    if (preferences.expirationAlertsEnabled !== undefined) updateData.expiration_alerts_enabled = preferences.expirationAlertsEnabled;
-    if (preferences.lowStockAlertsEnabled !== undefined) updateData.low_stock_alerts_enabled = preferences.lowStockAlertsEnabled;
-    if (preferences.usageRemindersEnabled !== undefined) updateData.usage_reminders_enabled = preferences.usageRemindersEnabled;
+    if (preferences.emailEnabled !== undefined)
+      updateData.email_enabled = preferences.emailEnabled;
+    if (preferences.pushEnabled !== undefined)
+      updateData.push_enabled = preferences.pushEnabled;
+    if (preferences.emailFrequency !== undefined)
+      updateData.email_frequency = preferences.emailFrequency;
+    if (preferences.expirationAlertsEnabled !== undefined)
+      updateData.expiration_alerts_enabled =
+        preferences.expirationAlertsEnabled;
+    if (preferences.lowStockAlertsEnabled !== undefined)
+      updateData.low_stock_alerts_enabled = preferences.lowStockAlertsEnabled;
+    if (preferences.usageRemindersEnabled !== undefined)
+      updateData.usage_reminders_enabled = preferences.usageRemindersEnabled;
 
     if (!existing || !existing.updatedAt) {
       // Create new preferences
@@ -305,7 +330,8 @@ export class AdvancedNotificationsService {
           email_enabled: preferences.emailEnabled ?? true,
           push_enabled: preferences.pushEnabled ?? true,
           email_frequency: preferences.emailFrequency ?? 'immediate',
-          expiration_alerts_enabled: preferences.expirationAlertsEnabled ?? true,
+          expiration_alerts_enabled:
+            preferences.expirationAlertsEnabled ?? true,
           low_stock_alerts_enabled: preferences.lowStockAlertsEnabled ?? true,
           usage_reminders_enabled: preferences.usageRemindersEnabled ?? false,
           updated_at: now.toISOString(),
@@ -314,7 +340,9 @@ export class AdvancedNotificationsService {
         .single();
 
       if (error) {
-        throw new Error(`Failed to create notification preferences: ${error.message}`);
+        throw new Error(
+          `Failed to create notification preferences: ${error.message}`,
+        );
       }
 
       return rowToNotificationPreferences(data);
@@ -328,7 +356,9 @@ export class AdvancedNotificationsService {
         .single();
 
       if (error) {
-        throw new Error(`Failed to update notification preferences: ${error.message}`);
+        throw new Error(
+          `Failed to update notification preferences: ${error.message}`,
+        );
       }
 
       return rowToNotificationPreferences(data);

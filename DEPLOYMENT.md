@@ -447,6 +447,7 @@ Secrets should be created with environment suffixes for isolation:
 - `stripe-webhook-secret-{env}`: Stripe webhook secret (dev, staging, prod)
 - `gemini-api-key-{env}`: Google Gemini API key (dev, staging, prod)
 - `revenuecat-secret-api-key-{env}`: RevenueCat Secret API Key (optional but recommended for mobile subscriptions)
+- `resend-api-key-{env}`: Resend API key for support emails (optional; see [Resend](https://resend.com) for setup; requires a verified domain or use their onboarding domain for "from" address)
 
 Example: `supabase-url-dev`, `supabase-url-staging`, `supabase-url-prod`
 
@@ -459,6 +460,9 @@ Example: `supabase-url-dev`, `supabase-url-staging`, `supabase-url-prod`
 - `CORS_ORIGIN`: Allowed CORS origin (default: `http://localhost:3000`)
 - `GEMINI_MODEL`: Gemini model to use (default: `gemini-1.0-pro`)
 - `REVENUECAT_WEBHOOK_SECRET`: RevenueCat webhook verification secret (optional, for webhook security)
+- `RESEND_API_KEY`: Resend API key for sending support contact and ticket notification emails (optional; if unset, support emails are skipped)
+- `SUPPORT_EMAIL_TO`: Email address that receives support contact form submissions and ticket notifications (default: `support@everredi.com`)
+- `EMAIL_FROM`: Sender address for outgoing emails (default: Resend onboarding domain; verify your own domain in Resend for production)
 
 ### Sentry Configuration (Optional)
 

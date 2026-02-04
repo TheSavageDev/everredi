@@ -74,6 +74,29 @@ export class DeviceTokensService {
   }
 
   /**
+   * Get distinct user IDs that have at least one active device token (for broadcast audience).
+   */
+  async getDistinctUserIdsWithActiveTokens(): Promise<string[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from('device_tokens')
+        .select('user_id')
+        .eq('is_active', true);
+
+      if (error) {
+        logger.error(`Error fetching user IDs with tokens: ${error.message}`);
+        return [];
+      }
+
+      const userIds = [...new Set((data || []).map((row) => row.user_id))];
+      return userIds;
+    } catch (error) {
+      logger.error('Error in getDistinctUserIdsWithActiveTokens:', error);
+      return [];
+    }
+  }
+
+  /**
    * Get all device tokens for a user
    */
   async getUserDeviceTokens(userId: string): Promise<DeviceToken[]> {

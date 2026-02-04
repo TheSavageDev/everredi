@@ -25,6 +25,7 @@ import { TeamsModule } from './teams/teams.module';
 import { SharingModule } from './sharing/sharing.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SupportModule } from './support/support.module';
+import { EmailModule } from './email/email.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { BrandPartnershipsModule } from './brands/brand-partnerships.module';
 import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
@@ -57,6 +58,11 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
         ttl: 86400000, // 1 day in milliseconds (24 * 60 * 60 * 1000)
         limit: 10000, // 10000 requests per day
       },
+      {
+        name: 'contact',
+        ttl: 3600000, // 1 hour
+        limit: 5, // 5 support contact requests per hour per IP
+      },
     ]),
     ConfigModule,
     SupabaseModule,
@@ -78,6 +84,7 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
     TeamsModule,
     SharingModule,
     ApiKeysModule,
+    EmailModule,
     SupportModule,
     CustomFieldsModule,
     BrandPartnershipsModule,

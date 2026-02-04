@@ -512,11 +512,11 @@ export class UserKitsService {
             );
             continue;
           }
-          // Use actualQuantity if provided, otherwise default to 0
-          const actualQty = (item as any).actualQuantity ?? 0;
+          // For fully loaded kits, actual quantity equals required quantity from template
+          const actualQty = item.requiredQuantity ?? 0;
           if (actualQty <= 0) {
             this.logger.warn(
-              `Skipping inventory item creation for ${item.supplyName || 'unknown item'}: actualQuantity is ${actualQty}`,
+              `Skipping inventory item creation for ${item.supplyName || 'unknown item'}: requiredQuantity is ${actualQty}`,
             );
             continue;
           }
@@ -589,14 +589,7 @@ export class UserKitsService {
         const inventoryItemIds = Array.from(inventoryItemMap.values());
         const { data: inventoryItems, error: fetchError } = await this.supabase
           .from('inventory_items')
-          .select(
-            `
-            id,
-            supply_id,
-            actual_quantity,
-            quantity
-          `,
-          )
+          .select('id, supply_id, actual_quantity')
           .in('id', inventoryItemIds);
 
         if (fetchError) {
@@ -633,6 +626,9 @@ export class UserKitsService {
       // CRITICAL: Only create requirements for empty kits, never for fully loaded kits
       // Fully loaded kits already have inventory items that serve as requirements
       if (!includeItems) {
+        this.logger.log(
+          `Creating empty kit requirements from ${templateItems.length} template items`,
+        );
         const kitItems = templateItems
           .filter((item) => item.supplyId || item.supplyName)
           .map((item) => {
@@ -646,6 +642,7 @@ export class UserKitsService {
             return {
               tenant_id: tenant.id,
               kit_id: kit.id,
+              location_id: locationId, // Include location from the kit
               supply_id: item.supplyId || null,
               freeform_name: item.supplyId
                 ? null
@@ -661,12 +658,20 @@ export class UserKitsService {
             };
           });
 
+        this.logger.log(
+          `Filtered to ${kitItems.length} valid kit items for empty kit`,
+        );
+
         if (kitItems.length > 0) {
           // Ensure all items have tenant_id
           const kitItemsWithTenant = kitItems.map((item) => ({
             ...item,
             tenant_id: tenant.id,
           }));
+
+          this.logger.log(
+            `Inserting ${kitItemsWithTenant.length} requirements into inventory_items for kit ${kit.id}`,
+          );
 
           const { error: itemsError } = await this.supabase
             .from('inventory_items')
@@ -681,6 +686,14 @@ export class UserKitsService {
               `Failed to create kit requirements: ${itemsError.message}`,
             );
           }
+
+          this.logger.log(
+            `✅ Successfully created ${kitItemsWithTenant.length} requirements for kit ${kit.id}`,
+          );
+        } else {
+          this.logger.warn(
+            `No valid items to create for empty kit ${kit.id}. Template items: ${JSON.stringify(templateItems.slice(0, 3))}`,
+          );
         }
       } else {
         // For fully loaded kits, the actual inventory items already serve as requirements

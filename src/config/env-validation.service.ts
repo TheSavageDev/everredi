@@ -16,10 +16,7 @@ export class EnvValidationService {
     const warnings: string[] = [];
 
     // Required environment variables
-    const required = [
-      'SUPABASE_URL',
-      'SUPABASE_SECRET_KEY',
-    ];
+    const required = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY'];
 
     // Check required vars
     for (const key of required) {
@@ -34,6 +31,7 @@ export class EnvValidationService {
       'STRIPE_SECRET_KEY',
       'STRIPE_WEBHOOK_SECRET',
       'GEMINI_API_KEY',
+      'RESEND_API_KEY',
     ];
 
     for (const key of recommended) {

@@ -4,6 +4,7 @@ import {
   Inject,
   Logger,
   NotFoundException,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -11,6 +12,7 @@ import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { UserKitsService } from '../kits/user-kits.service';
+import { CloudTasksService } from '../notifications/cloud-tasks.service';
 
 const logger = new Logger('InventoryService');
 
@@ -91,6 +93,7 @@ export class InventoryService {
     private readonly tenantsService: TenantsService,
     @Inject(forwardRef(() => UserKitsService))
     private readonly userKitsService?: UserKitsService,
+    @Optional() private readonly cloudTasksService?: CloudTasksService,
   ) {}
 
   /**
@@ -354,11 +357,24 @@ export class InventoryService {
 
     // Calculate status based on quantities
     // Only auto-calculate for fulfillment states, preserve lifecycle states (used, disposed, expired)
-    let calculatedStatus: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
+    let calculatedStatus:
+      | 'complete'
+      | 'partial'
+      | 'missing'
+      | 'used'
+      | 'disposed'
+      | 'expired';
     const lifecycleStates = ['used', 'disposed', 'expired'];
     if (
       itemData.status &&
-      ['complete', 'partial', 'missing', 'used', 'disposed', 'expired'].includes(itemData.status)
+      [
+        'complete',
+        'partial',
+        'missing',
+        'used',
+        'disposed',
+        'expired',
+      ].includes(itemData.status)
     ) {
       calculatedStatus = itemData.status;
     } else if (itemData.requiredQuantity !== undefined) {
@@ -448,6 +464,20 @@ export class InventoryService {
       }
     }
 
+    if (expirationDate && this.cloudTasksService) {
+      try {
+        await this.cloudTasksService.createExpirationTasks(
+          inventoryItem.id,
+          expirationDate,
+          userId,
+        );
+      } catch (error) {
+        logger.warn(
+          `Failed to create expiration tasks for item ${inventoryItem.id}: ${error}`,
+        );
+      }
+    }
+
     // Return item with all fields populated
     return rowToInventoryItem(inventoryItem);
   }
@@ -520,7 +550,8 @@ export class InventoryService {
         ? updates.requiredQuantity !== null
           ? Number(updates.requiredQuantity)
           : null
-        : currentItem.required_quantity !== null && currentItem.required_quantity !== undefined
+        : currentItem.required_quantity !== null &&
+            currentItem.required_quantity !== undefined
           ? Number(currentItem.required_quantity)
           : null;
 
@@ -528,8 +559,15 @@ export class InventoryService {
     const lifecycleStates = ['used', 'disposed', 'expired'];
     const currentStatus = currentItem.status as string;
 
-    const validStatuses = ['complete', 'partial', 'missing', 'used', 'disposed', 'expired'];
-    
+    const validStatuses = [
+      'complete',
+      'partial',
+      'missing',
+      'used',
+      'disposed',
+      'expired',
+    ];
+
     if (updates.status !== undefined) {
       // Status explicitly provided - validate and use it
       if (!validStatuses.includes(updates.status)) {
@@ -539,11 +577,18 @@ export class InventoryService {
       }
       processedUpdates.status = updates.status;
     } else if (
-      (updates.actualQuantity !== undefined || updates.requiredQuantity !== undefined) &&
+      (updates.actualQuantity !== undefined ||
+        updates.requiredQuantity !== undefined) &&
       !lifecycleStates.includes(currentStatus)
     ) {
       // Quantities changed and current status is not a lifecycle state - recalculate status
-      let calculatedStatus: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
+      let calculatedStatus:
+        | 'complete'
+        | 'partial'
+        | 'missing'
+        | 'used'
+        | 'disposed'
+        | 'expired';
       if (requiredQty !== undefined && requiredQty !== null) {
         // For kit items with required_quantity
         if (actualQty >= requiredQty) {
@@ -625,6 +670,20 @@ export class InventoryService {
           `Failed to recalculate compliance after updating inventory item: ${error}`,
         );
         // Don't fail item update if compliance check fails
+      }
+    }
+
+    if (newExpirationDate && this.cloudTasksService) {
+      try {
+        await this.cloudTasksService.createExpirationTasks(
+          itemId,
+          newExpirationDate,
+          userId,
+        );
+      } catch (error) {
+        logger.warn(
+          `Failed to create expiration tasks for item ${itemId}: ${error}`,
+        );
       }
     }
 
@@ -766,7 +825,9 @@ export class InventoryService {
       .not('required_quantity', 'is', null);
 
     if (error1) {
-      logger.error(`Error fetching items with required_quantity: ${error1.message}`);
+      logger.error(
+        `Error fetching items with required_quantity: ${error1.message}`,
+      );
     }
 
     // Also get items in kits that might not have required_quantity set yet
@@ -796,13 +857,17 @@ export class InventoryService {
     const itemsArray = Array.from(allItems.values());
 
     if (itemsArray.length === 0) {
-      logger.log(`No items with required_quantity or in kits found for user ${userId}`);
+      logger.log(
+        `No items with required_quantity or in kits found for user ${userId}`,
+      );
       return [];
     }
 
     // For items without required_quantity, try to get it from the matching requirement
     // Batch lookup requirements for all kits
-    const kitIds = [...new Set(itemsArray.map((item) => item.kit_id).filter(Boolean))];
+    const kitIds = [
+      ...new Set(itemsArray.map((item) => item.kit_id).filter(Boolean)),
+    ];
     const requirementsMap = new Map<string, number>();
 
     if (kitIds.length > 0) {
@@ -852,16 +917,16 @@ export class InventoryService {
     const lowQuantityItems = enrichedItems.filter((item) => {
       const actualQty = item.actual_quantity || 0;
       const requiredQty = item.required_quantity || 0;
-      
+
       // Must have a required quantity
       if (requiredQty === 0) return false;
-      
+
       // Only show items that are actually below required (not at or above)
       if (actualQty >= requiredQty) return false;
-      
+
       // Calculate percentage remaining
       const percentRemaining = actualQty / requiredQty;
-      
+
       // Show if percentage remaining is at or below threshold (e.g., 10% or less remaining)
       return percentRemaining <= threshold;
     });

@@ -3,9 +3,11 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
+import { EmailService } from '../email/email.service';
 import { PushNotificationService } from './push-notification.service';
 import { NotificationsService } from './notifications.service';
 import { UsersService } from '../users/users.service';
+import { AdvancedNotificationsService } from './advanced-notifications.service';
 
 const logger = new Logger('ExpirationNotificationsService');
 
@@ -18,15 +20,17 @@ interface InventoryItem {
   sent_notifications?: string[]; // Array of days (e.g., ['60', '30', '10', '1'])
 }
 
+const DEFAULT_ALERT_DAYS = [60, 30, 10, 1];
+
 @Injectable()
 export class ExpirationNotificationsService {
-  private readonly alertDays = [60, 30, 10, 1]; // Days before expiration to send alerts
-
   constructor(
     @Inject(SUPABASE) private readonly supabase: SupabaseClient,
     private readonly pushNotificationService: PushNotificationService,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
+    private readonly advancedNotificationsService: AdvancedNotificationsService,
+    private readonly emailService: EmailService,
   ) {}
 
   /**
@@ -57,6 +61,23 @@ export class ExpirationNotificationsService {
       for (const user of users || []) {
         const userId = user.id;
 
+        const preferences =
+          await this.advancedNotificationsService.getNotificationPreferences(
+            userId,
+          );
+        const expirationAlertsEnabled =
+          preferences?.expirationAlertsEnabled ?? true;
+
+        const userThresholds =
+          await this.advancedNotificationsService.getAlertThresholds(userId);
+        const alertDays =
+          userThresholds.length > 0
+            ? [...userThresholds]
+                .map((t) => t.daysBeforeExpiration)
+                .filter((d, i, arr) => arr.indexOf(d) === i)
+                .sort((a, b) => b - a)
+            : DEFAULT_ALERT_DAYS;
+
         const isPremium = await this.usersService.isPremiumUser(userId);
 
         // Get active inventory items with expiration dates
@@ -67,7 +88,9 @@ export class ExpirationNotificationsService {
           .not('expiration_date', 'is', null);
 
         if (itemsError) {
-          logger.error(`Error getting items for user ${userId}: ${itemsError.message}`);
+          logger.error(
+            `Error getting items for user ${userId}: ${itemsError.message}`,
+          );
           continue;
         }
 
@@ -87,7 +110,7 @@ export class ExpirationNotificationsService {
           // Only update items that aren't already in lifecycle states
           const lifecycleStates = ['used', 'disposed', 'expired'];
           const currentStatus = item.status as string;
-          
+
           if (
             expirationDate < now &&
             !lifecycleStates.includes(currentStatus)
@@ -101,7 +124,7 @@ export class ExpirationNotificationsService {
                 })
                 .eq('id', item.id)
                 .eq('user_id', userId);
-              
+
               totalExpiredUpdated++;
               logger.log(
                 `Updated item ${item.id} (${item.supply_name}) to expired status`,
@@ -116,19 +139,23 @@ export class ExpirationNotificationsService {
             continue;
           }
 
-          // Check each alert threshold (in descending order: 60, 30, 10, 1)
-          for (const alertDays of this.alertDays) {
+          if (!expirationAlertsEnabled) {
+            continue;
+          }
+
+          // Check each alert threshold (user-defined or default, descending)
+          for (const thresholdDays of alertDays) {
             // Find the next smaller alert threshold (or 0 if this is the smallest)
             const nextSmallerAlert =
-              this.alertDays.find((d) => d < alertDays) || 0;
+              alertDays.find((d) => d < thresholdDays) || 0;
 
             // Check if we should send notification for this threshold
-            // Send when: daysUntilExpiration <= alertDays AND daysUntilExpiration > nextSmallerAlert
+            // Send when: daysUntilExpiration <= thresholdDays AND daysUntilExpiration > nextSmallerAlert
             // This ensures we only send one alert per threshold window
             if (
-              daysUntilExpiration <= alertDays &&
+              daysUntilExpiration <= thresholdDays &&
               daysUntilExpiration > nextSmallerAlert &&
-              !this.hasNotificationBeenSent(item, alertDays)
+              !this.hasNotificationBeenSent(item, thresholdDays)
             ) {
               if (!isPremium && remindersCreatedForUser >= maxFreeReminders) {
                 continue;
@@ -136,14 +163,18 @@ export class ExpirationNotificationsService {
               try {
                 await this.sendExpirationNotification(
                   item,
-                  alertDays,
+                  thresholdDays,
                   daysUntilExpiration,
                 );
-                await this.markNotificationAsSent(item.id, userId, alertDays);
+                await this.markNotificationAsSent(
+                  item.id,
+                  userId,
+                  thresholdDays,
+                );
                 totalNotificationsSent++;
                 remindersCreatedForUser++;
                 logger.log(
-                  `Sent ${alertDays}-day expiration notification for item ${item.id} (${item.supply_name})`,
+                  `Sent ${thresholdDays}-day expiration notification for item ${item.id} (${item.supply_name})`,
                 );
               } catch (error) {
                 logger.error(
@@ -220,13 +251,17 @@ export class ExpirationNotificationsService {
         ? '1 day'
         : `${actualDaysUntilExpiration} days`;
 
-    // Send push notification
-    await this.pushNotificationService.sendExpirationNotification(
+    const pushEnabled = await this.advancedNotificationsService.isPushEnabled(
       item.user_id,
-      item.supply_name,
-      actualDaysUntilExpiration,
-      item.id,
     );
+    if (pushEnabled) {
+      await this.pushNotificationService.sendExpirationNotification(
+        item.user_id,
+        item.supply_name,
+        actualDaysUntilExpiration,
+        item.id,
+      );
+    }
 
     // Create in-app notification
     await this.notificationsService.createNotification(item.user_id, {
@@ -241,6 +276,25 @@ export class ExpirationNotificationsService {
       isRead: false,
       sentAt: new Date(),
     });
+
+    if (this.emailService.isConfigured()) {
+      const prefs =
+        await this.advancedNotificationsService.getNotificationPreferences(
+          item.user_id,
+        );
+      if (prefs?.emailEnabled) {
+        const user = await this.usersService.getUserById(item.user_id);
+        if (user?.email) {
+          this.emailService
+            .sendExpirationNotificationEmail(
+              user.email,
+              item.supply_name,
+              actualDaysUntilExpiration,
+            )
+            .catch(() => {});
+        }
+      }
+    }
   }
 
   /**

@@ -184,13 +184,19 @@ export class UserKitsController {
       selectedPeopleCount?: number;
     },
   ) {
+    this.logger.log(
+      `Creating kit from template: ${body.templateId}, isPublicTemplate: ${body.isPublicTemplate}, includeItems: ${body.includeItems}`,
+    );
+
     // Always get template items (for both empty and fully loaded kits)
-    let templateItems: Array<{
-      supplyId: string;
-      supplyName?: string;
-      requiredQuantity: number;
-      notes?: string;
-    }> | undefined;
+    let templateItems:
+      | Array<{
+          supplyId: string;
+          supplyName?: string;
+          requiredQuantity: number;
+          notes?: string;
+        }>
+      | undefined;
 
     if (body.isPublicTemplate) {
       // For public templates, get items directly from the public template
@@ -200,6 +206,9 @@ export class UserKitsController {
             body.templateId,
             body.selectedPeopleCount,
           );
+        this.logger.log(
+          `Retrieved ${publicItems.length} items from public template ${body.templateId}`,
+        );
         // Map quantity to requiredQuantity
         templateItems = publicItems.map((item) => ({
           supplyId: item.supplyId,
@@ -224,6 +233,9 @@ export class UserKitsController {
           body.templateId,
           body.selectedPeopleCount,
         );
+        this.logger.log(
+          `Retrieved ${templateItems.length} items from user template ${body.templateId}`,
+        );
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
@@ -235,6 +247,10 @@ export class UserKitsController {
         templateItems = [];
       }
     }
+
+    this.logger.log(
+      `Template items to create: ${templateItems?.length || 0}, first item: ${JSON.stringify(templateItems?.[0] || null)}`,
+    );
 
     const kit = await this.userKitsService.createUserKitFromTemplate(
       user.uid,

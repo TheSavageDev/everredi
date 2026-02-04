@@ -1,4 +1,10 @@
-import { Injectable, Inject, NotFoundException, Logger, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  Logger,
+  ForbiddenException,
+} from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
@@ -309,24 +315,44 @@ export class PublicTemplatesService {
       .limit(1)
       .single();
 
+    let items: any[] = [];
+
     if (revisionError || !revision) {
-      // No revision found, return empty array
-      return [];
-    }
+      // No revision found, fall back to kit_template_items table
+      this.logger.log(
+        `No revision found for template ${templateId}, falling back to kit_template_items`,
+      );
+      const { data: legacyItems, error: legacyError } = await this.supabase
+        .from('kit_template_items')
+        .select('*')
+        .eq('kit_template_id', templateId)
+        .order('sort_order', { ascending: true });
 
-    // Get template items from the revision
-    const { data: items, error: itemsError } = await this.supabase
-      .from('kit_template_revision_items')
-      .select('*')
-      .eq('template_revision_id', revision.id)
-      .order('sort_order', { ascending: true });
+      if (legacyError) {
+        this.logger.error(
+          `Failed to get template items from kit_template_items: ${legacyError.message}`,
+        );
+        return [];
+      }
 
-    if (itemsError) {
-      throw new Error(`Failed to get template items: ${itemsError.message}`);
+      items = legacyItems || [];
+    } else {
+      // Get template items from the revision
+      const { data: revisionItems, error: itemsError } = await this.supabase
+        .from('kit_template_revision_items')
+        .select('*')
+        .eq('template_revision_id', revision.id)
+        .order('sort_order', { ascending: true });
+
+      if (itemsError) {
+        throw new Error(`Failed to get template items: ${itemsError.message}`);
+      }
+
+      items = revisionItems || [];
     }
 
     // Get all supply IDs to fetch supply names
-    const supplyIds = (items || [])
+    const supplyIds = items
       .map((item: any) => item.supply_id)
       .filter((id: string | null) => id !== null) as string[];
 
@@ -345,25 +371,25 @@ export class PublicTemplatesService {
       }
     }
 
-    return (items || []).map((item: any, index: number) => {
-      // Calculate quantity from required_units (template requirement)
-      // required_units is the base quantity from the template
-      const baseQuantity = item.required_units ?? 0;
+    return items.map((item: any) => {
+      // Calculate quantity from required_units (revision) or quantity (legacy)
+      const baseQuantity = item.required_units ?? item.quantity ?? 0;
 
       const quantity = this.calculateItemQuantity(
         {
           quantity: baseQuantity,
           scalesWithPeople: item.scales_with_people,
-          peopleCountQuantities: item.people_count_units,
+          peopleCountQuantities:
+            item.people_count_units ?? item.people_count_quantities,
         },
         peopleCount,
         defaultPeopleCount,
       );
 
-      // Get supply name from the map
+      // Get supply name from the map, or use the stored supply_name
       const supplyName = item.supply_id
-        ? supplyNamesMap.get(item.supply_id)
-        : undefined;
+        ? supplyNamesMap.get(item.supply_id) || item.supply_name
+        : item.supply_name;
 
       return {
         supplyId: item.supply_id,

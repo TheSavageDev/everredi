@@ -46,7 +46,9 @@ DO $$ BEGIN
   CREATE TYPE permission_level AS ENUM ('view', 'edit', 'admin');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- inventory_lot_status enum removed (migration 006) - lots table was removed
+DO $$ BEGIN
+  CREATE TYPE inventory_lot_status AS ENUM ('active', 'expired', 'used', 'disposed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- =========================
 -- Core Tables
@@ -354,14 +356,14 @@ CREATE TRIGGER trg_kits_updated_at
 -- Consolidated Inventory Items
 -- =========================
 -- This table consolidates both kit_items and inventory_items
--- - Items in kits: kit_id is set (deleting kit CASCADE deletes its items)
+-- - Items in kits: kit_id is set
 -- - Items not in kits: kit_id is NULL
--- - One row per item type; required/compliance from required_quantity vs actual_quantity
+-- - Requirements/placeholders: is_requirement = true and/or quantity = 0
 
 CREATE TABLE IF NOT EXISTS inventory_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  kit_id UUID REFERENCES kits(id) ON DELETE CASCADE, -- NULL = not in a kit; kit delete removes items
+  kit_id UUID REFERENCES kits(id) ON DELETE SET NULL, -- NULL = not in a kit
   supply_id UUID REFERENCES supplies(id) ON DELETE SET NULL,
   freeform_name TEXT, -- Required if supply_id is NULL
   supply_name VARCHAR(255) NOT NULL, -- Denormalized for performance
@@ -369,13 +371,12 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
   location_name VARCHAR(255), -- Denormalized
   
-  -- Quantity fields
-  actual_quantity INTEGER NOT NULL DEFAULT 0 CHECK (actual_quantity >= 0), -- Actual quantity on hand
-  required_quantity INTEGER CHECK (required_quantity >= 0), -- Required quantity (for kit items)
-  lot_code TEXT, -- Lot/batch identifier (stored directly on item)
-  status VARCHAR(20) NOT NULL DEFAULT 'missing' CHECK (status IN ('complete', 'partial', 'missing')),
+  -- Quantity and status
+  quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  is_requirement BOOLEAN NOT NULL DEFAULT false, -- true = placeholder/requirement, false = actual item
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'used', 'disposed', 'missing')),
   
-  -- Expiration tracking (stored directly on item, no separate lots table)
+  -- Expiration tracking (simple case, complex cases use inventory_lots)
   expiration_date TIMESTAMP,
   
   -- Purchase info
@@ -405,11 +406,9 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_kit_id ON inventory_items(kit_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_items_supply_id ON inventory_items(supply_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_location_id ON inventory_items(location_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_status ON inventory_items(status);
-CREATE INDEX IF NOT EXISTS idx_inventory_items_actual_quantity ON inventory_items(actual_quantity) WHERE actual_quantity IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_inventory_items_required_quantity ON inventory_items(required_quantity) WHERE required_quantity IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_inventory_items_lot_code ON inventory_items(lot_code) WHERE lot_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_is_requirement ON inventory_items(is_requirement);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_expiration_date ON inventory_items(expiration_date) WHERE expiration_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_inventory_items_expiring ON inventory_items(expiration_date) WHERE expiration_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_expiring ON inventory_items(status, expiration_date) WHERE status = 'active' AND expiration_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant_status ON inventory_items(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_kit_status ON inventory_items(kit_id, status) WHERE kit_id IS NOT NULL;
 
@@ -427,12 +426,29 @@ CREATE TRIGGER update_inventory_items_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
--- inventory_lots table has been REMOVED (migration 006)
--- Lot data is now stored directly on inventory_items:
--- - lot_code (TEXT) - Lot/batch identifier
--- - expiration_date (TIMESTAMP) - Expiration date
--- - purchase_date, purchase_price, supplier - Purchase information
--- Each lot is now a separate inventory_items row
+-- Inventory lots table (for multiple expirations per item)
+CREATE TABLE IF NOT EXISTS inventory_lots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  quantity_units INTEGER NOT NULL CHECK (quantity_units >= 0),
+  expiration_date DATE,
+  lot_code TEXT,
+  purchase_date DATE,
+  purchase_price NUMERIC(10, 2),
+  supplier TEXT,
+  status inventory_lot_status NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_lots_item_exp ON inventory_lots(inventory_item_id, expiration_date);
+CREATE INDEX IF NOT EXISTS idx_inventory_lots_status_exp ON inventory_lots(status, expiration_date);
+CREATE INDEX IF NOT EXISTS idx_inventory_lots_item ON inventory_lots(inventory_item_id);
+
+CREATE TRIGGER trg_inventory_lots_updated_at
+  BEFORE UPDATE ON inventory_lots
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
 
 -- =========================
 -- Sharing & Access Control
@@ -760,9 +776,20 @@ CREATE INDEX IF NOT EXISTS idx_ai_recommendations_user_created ON ai_recommendat
 -- Views
 -- =========================
 
--- v_kit_actual_units view has been REMOVED (migration 006)
--- actual_quantity is now stored directly on inventory_items table
--- No aggregation needed - each item has its own actual_quantity
+-- View for kit actual units (from inventory_lots)
+CREATE OR REPLACE VIEW v_kit_actual_units AS
+SELECT
+  k.id AS kit_id,
+  COALESCE(ii.supply_id::text, ii.freeform_name) AS supply_key,
+  SUM(il.quantity_units) AS actual_units
+FROM kits k
+JOIN inventory_items ii ON ii.kit_id = k.id
+JOIN inventory_lots il ON il.inventory_item_id = ii.id
+WHERE
+  k.deleted_at IS NULL
+  AND il.status = 'active'
+  AND (il.expiration_date IS NULL OR il.expiration_date >= CURRENT_DATE)
+GROUP BY k.id, COALESCE(ii.supply_id::text, ii.freeform_name);
 
 -- View for kit item status (for requirements)
 CREATE OR REPLACE VIEW v_kit_item_status AS
@@ -771,12 +798,18 @@ SELECT
   ii.kit_id,
   ii.supply_id,
   COALESCE(ii.supply_name, ii.freeform_name) AS supply_name,
-  ii.required_quantity AS required_quantity,
-  ii.actual_quantity AS actual_quantity,
+  ii.quantity AS required_quantity,
+  COALESCE(va.actual_units, 0) AS actual_quantity,
   CASE
-    WHEN ii.actual_quantity >= COALESCE(ii.required_quantity, 0) THEN 'complete'
-    WHEN ii.actual_quantity > 0 THEN 'partial'
+    WHEN COALESCE(va.actual_units, 0) >= ii.quantity THEN 'complete'
+    WHEN COALESCE(va.actual_units, 0) > 0 THEN 'partial'
     ELSE 'missing'
   END AS status
 FROM inventory_items ii
+LEFT JOIN v_kit_actual_units va
+  ON va.kit_id = ii.kit_id
+  AND (
+    (ii.supply_id IS NOT NULL AND va.supply_key = ii.supply_id::text) OR
+    (ii.supply_id IS NULL AND va.supply_key = ii.freeform_name)
+  )
 WHERE ii.kit_id IS NOT NULL;

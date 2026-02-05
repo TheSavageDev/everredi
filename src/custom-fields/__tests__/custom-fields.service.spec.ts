@@ -22,7 +22,6 @@ describe('CustomFieldsService', () => {
         user_id: 'user1',
         name: 'Field 1',
         field_type: 'text',
-        is_required: false,
         order: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -76,17 +75,21 @@ describe('CustomFieldsService', () => {
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockData as jest.Mock)('custom_fields', [existingField]);
-      jest.spyOn(service, 'getCustomFields').mockResolvedValue([{
-        id: '1',
-        userId: 'user1',
-        name: 'Existing Field',
-        type: 'text',
-        required: false,
-        order: 5,
-        createdAt: new Date(existingField.created_at),
-        updatedAt: new Date(existingField.updated_at),
-      }]);
+      (supabaseMock._setMockData as jest.Mock)('custom_fields', [
+        existingField,
+      ]);
+      jest.spyOn(service, 'getCustomFields').mockResolvedValue([
+        {
+          id: '1',
+          userId: 'user1',
+          name: 'Existing Field',
+          type: 'text',
+          required: false,
+          order: 5,
+          createdAt: new Date(existingField.created_at),
+          updatedAt: new Date(existingField.updated_at),
+        },
+      ]);
 
       const fieldData = {
         name: 'New Field',
@@ -107,13 +110,16 @@ describe('CustomFieldsService', () => {
         user_id: 'user1',
         name: 'Old Name',
         field_type: 'text',
-        is_required: false,
         order: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockDocument as jest.Mock)('custom_fields', '1', existingField);
+      (supabaseMock._setMockDocument as jest.Mock)(
+        'custom_fields',
+        '1',
+        existingField,
+      );
 
       const updates = {
         name: 'New Name',
@@ -142,13 +148,16 @@ describe('CustomFieldsService', () => {
         user_id: 'user1',
         name: 'Test Field',
         field_type: 'text',
-        is_required: false,
         order: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockDocument as jest.Mock)('custom_fields', '1', existingField);
+      (supabaseMock._setMockDocument as jest.Mock)(
+        'custom_fields',
+        '1',
+        existingField,
+      );
 
       await service.deleteCustomField('user1', '1');
 
@@ -167,7 +176,7 @@ describe('CustomFieldsService', () => {
   describe('reorderFields', () => {
     it('should reorder fields using batch update', async () => {
       const fieldIds = ['field1', 'field2', 'field3'];
-      
+
       // Setup mock fields
       (supabaseMock._setMockData as jest.Mock)('custom_fields', [
         { id: 'field1', user_id: 'user1', order: 0 },

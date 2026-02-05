@@ -59,7 +59,6 @@ export class CustomFieldsController {
     const field = await this.customFieldsService.createCustomField(userId, {
       name: body.name,
       type: body.type,
-      required: body.required ?? false,
       options: body.options,
       order,
     });

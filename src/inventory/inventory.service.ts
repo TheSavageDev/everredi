@@ -129,8 +129,68 @@ export class InventoryService {
     return undefined;
   }
 
+  async getInventoryItemsPaginated(
+    userId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ data: InventoryItem[]; hasMore: boolean; page: number }> {
+    // Each user can belong to multiple tenants (own + shared).
+    // Inventory items should include all items across ALL of the user's tenants.
+    const defaultTenant =
+      await this.tenantsService.getUserDefaultTenant(userId);
+    const userTenants = await this.tenantsService.getUserTenants(userId);
+    const tenantIds = [
+      ...new Set([defaultTenant.id, ...userTenants.map((t) => t.id)]),
+    ];
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const { data: rows, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .in('tenant_id', tenantIds)
+      .order('updated_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      logger.error(
+        `Error fetching inventory items (paginated): ${error.message}`,
+      );
+      throw new Error(`Failed to get inventory items: ${error.message}`);
+    }
+
+    const chunk = (rows || []) as any[];
+    const kitIds = [
+      ...new Set(chunk.map((r: any) => r.kit_id).filter(Boolean)),
+    ] as string[];
+    const tenantIdsInRows = [
+      ...new Set(chunk.map((r: any) => r.tenant_id)),
+    ] as string[];
+    let kitNameMap = new Map<string, string>();
+    if (kitIds.length > 0) {
+      const { data: kitsData } = await this.supabase
+        .from('kits')
+        .select('id, name')
+        .in('tenant_id', tenantIdsInRows)
+        .in('id', kitIds);
+      if (kitsData) {
+        kitNameMap = new Map(
+          kitsData.map((k: { id: string; name: string }) => [k.id, k.name]),
+        );
+      }
+    }
+
+    const data = chunk.map((item: any) => rowToInventoryItem(item, kitNameMap));
+    return {
+      data,
+      hasMore: chunk.length === pageSize,
+      page,
+    };
+  }
+
   async getInventoryItems(userId: string): Promise<InventoryItem[]> {
-    // Include default tenant and all tenants the user is a member of (so we never miss the tenant with most items).
+    // Each user can belong to multiple tenants (own + shared).
+    // Inventory items should include all items across ALL of the user's tenants.
     const defaultTenant =
       await this.tenantsService.getUserDefaultTenant(userId);
     const userTenants = await this.tenantsService.getUserTenants(userId);
@@ -242,7 +302,9 @@ export class InventoryService {
       rowToInventoryItem(item, kitNameMap),
     );
     logger.log(
-      `getInventoryItems: returning ${result.length} items for ${tenantIds.length} tenant(s), unique kits: ${kitIds.length}`,
+      `getInventoryItems: returning ${result.length} items for tenants [${tenantIds.join(
+        ', ',
+      )}], unique kits: ${kitIds.length}`,
     );
     return result;
   }
@@ -477,22 +539,23 @@ export class InventoryService {
       Object.entries(insertData).filter(([, value]) => value !== undefined),
     );
 
-    // If item is in a kit, lookup required_quantity from the single row for (kit, supply)
+    // If item is in a kit, lookup required_quantity from matching requirement
     if (kitId && !itemData.requiredQuantity) {
-      const { data: existing } = await this.supabase
+      const { data: requirement } = await this.supabase
         .from('inventory_items')
         .select('required_quantity')
         .eq('kit_id', kitId)
         .eq('tenant_id', tenant.id)
+        .not('required_quantity', 'is', null)
         .or(
           itemData.supplyId
             ? `supply_id.eq.${itemData.supplyId}`
             : `freeform_name.eq.${itemData.supplyName}`,
         )
-        .maybeSingle();
+        .single();
 
-      if (existing?.required_quantity) {
-        filteredData.required_quantity = existing.required_quantity;
+      if (requirement && requirement.required_quantity) {
+        filteredData.required_quantity = requirement.required_quantity;
       }
     }
 
@@ -945,16 +1008,34 @@ export class InventoryService {
       return [];
     }
 
-    // Build map: key = kit_id + supply_id/freeform, value = required_quantity (from same row)
+    // For items without required_quantity, try to get it from the matching requirement
+    // Batch lookup requirements for all kits
+    const kitIds = [
+      ...new Set(itemsArray.map((item) => item.kit_id).filter(Boolean)),
+    ];
     const requirementsMap = new Map<string, number>();
-    itemsArray.forEach((item) => {
-      if (item.kit_id && item.required_quantity && item.required_quantity > 0) {
-        const key = item.supply_id
-          ? `${item.kit_id}:supply:${item.supply_id}`
-          : `${item.kit_id}:freeform:${item.freeform_name}`;
-        requirementsMap.set(key, item.required_quantity);
+
+    if (kitIds.length > 0) {
+      const { data: requirements, error: reqError } = await this.supabase
+        .from('inventory_items')
+        .select('kit_id, supply_id, freeform_name, required_quantity')
+        .eq('tenant_id', tenant.id)
+        .in('kit_id', kitIds)
+        .not('required_quantity', 'is', null)
+        .gt('required_quantity', 0);
+
+      if (reqError) {
+        logger.warn(`Error fetching requirements: ${reqError.message}`);
+      } else if (requirements) {
+        // Build a map: key = kit_id + supply_id/freeform_name, value = required_quantity
+        requirements.forEach((req) => {
+          const key = req.supply_id
+            ? `${req.kit_id}:supply:${req.supply_id}`
+            : `${req.kit_id}:freeform:${req.freeform_name}`;
+          requirementsMap.set(key, req.required_quantity);
+        });
       }
-    });
+    }
 
     // Enrich items with required_quantity from requirements if missing
     const enrichedItems = itemsArray.map((item) => {

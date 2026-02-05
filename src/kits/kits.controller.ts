@@ -33,7 +33,38 @@ export class KitsController {
 
   // Kit Templates
   @Get()
-  async getKitTemplates(@CurrentUser() user: { uid: string }) {
+  async getKitTemplates(
+    @CurrentUser() user: { uid: string },
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = page != null ? parseInt(page, 10) : undefined;
+    const pageSizeNum =
+      pageSize != null ? Math.min(parseInt(pageSize, 10), 50) : undefined;
+
+    if (
+      pageNum != null &&
+      !Number.isNaN(pageNum) &&
+      pageSizeNum != null &&
+      !Number.isNaN(pageSizeNum) &&
+      pageNum >= 1 &&
+      pageSizeNum >= 1
+    ) {
+      const result = await this.templatesService.getKitTemplatesPaginated(
+        user.uid,
+        pageNum,
+        pageSizeNum,
+      );
+      return {
+        success: true,
+        data: result.data,
+        hasMore: result.hasMore,
+        page: result.page,
+        message: 'Kit templates retrieved successfully',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const templates = await this.templatesService.getKitTemplates(user.uid);
     return {
       success: true,
@@ -171,7 +202,38 @@ export class UserKitsController {
   ) {}
 
   @Get()
-  async getUserKits(@CurrentUser() user: { uid: string }) {
+  async getUserKits(
+    @CurrentUser() user: { uid: string },
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = page != null ? parseInt(page, 10) : undefined;
+    const pageSizeNum =
+      pageSize != null ? Math.min(parseInt(pageSize, 10), 50) : undefined;
+
+    if (
+      pageNum != null &&
+      !Number.isNaN(pageNum) &&
+      pageSizeNum != null &&
+      !Number.isNaN(pageSizeNum) &&
+      pageNum >= 1 &&
+      pageSizeNum >= 1
+    ) {
+      const result = await this.userKitsService.getUserKitsPaginated(
+        user.uid,
+        pageNum,
+        pageSizeNum,
+      );
+      return {
+        success: true,
+        data: result.data,
+        hasMore: result.hasMore,
+        page: result.page,
+        message: 'User kits retrieved successfully',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const kits = await this.userKitsService.getUserKits(user.uid);
     return {
       success: true,
@@ -636,7 +698,39 @@ export class PublicTemplatesController {
     @CurrentUser() user: { uid: string },
     @Query('purpose') purpose?: string,
     @Query('skillLevel') skillLevel?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
+    const pageNum = page != null ? parseInt(page, 10) : undefined;
+    const pageSizeNum =
+      pageSize != null ? Math.min(parseInt(pageSize, 10), 50) : undefined;
+
+    if (
+      pageNum != null &&
+      !Number.isNaN(pageNum) &&
+      pageSizeNum != null &&
+      !Number.isNaN(pageSizeNum) &&
+      pageNum >= 1 &&
+      pageSizeNum >= 1
+    ) {
+      const result =
+        await this.publicTemplatesService.getPublicTemplatesPaginated(
+          pageNum,
+          pageSizeNum,
+          purpose,
+          skillLevel,
+          user?.uid,
+        );
+      return {
+        success: true,
+        data: result.data,
+        hasMore: result.hasMore,
+        page: result.page,
+        message: 'Public templates retrieved successfully',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const templates = await this.publicTemplatesService.getPublicTemplates(
       purpose,
       skillLevel,

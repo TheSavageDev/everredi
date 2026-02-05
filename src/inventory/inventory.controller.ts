@@ -19,7 +19,38 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get()
-  async getInventoryItems(@CurrentUser() user: { uid: string }) {
+  async getInventoryItems(
+    @CurrentUser() user: { uid: string },
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = page != null ? parseInt(page, 10) : undefined;
+    const pageSizeNum =
+      pageSize != null ? Math.min(parseInt(pageSize, 10), 50) : undefined;
+
+    if (
+      pageNum != null &&
+      !Number.isNaN(pageNum) &&
+      pageSizeNum != null &&
+      !Number.isNaN(pageSizeNum) &&
+      pageNum >= 1 &&
+      pageSizeNum >= 1
+    ) {
+      const result = await this.inventoryService.getInventoryItemsPaginated(
+        user.uid,
+        pageNum,
+        pageSizeNum,
+      );
+      return {
+        success: true,
+        data: result.data,
+        hasMore: result.hasMore,
+        page: result.page,
+        message: 'Inventory items retrieved successfully',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const items = await this.inventoryService.getInventoryItems(user.uid);
     return {
       success: true,
@@ -87,16 +118,25 @@ export class InventoryController {
     // Map quantity to actualQuantity for backward compatibility
     // Also convert date strings to Date objects
     const mappedUpdates: any = { ...updates };
-    if (updates.quantity !== undefined && updates.actualQuantity === undefined) {
+    if (
+      updates.quantity !== undefined &&
+      updates.actualQuantity === undefined
+    ) {
       mappedUpdates.actualQuantity = updates.quantity;
       delete mappedUpdates.quantity;
     }
-    
+
     // Convert date strings to Date objects if provided
-    if (updates.expirationDate !== undefined && typeof updates.expirationDate === 'string') {
+    if (
+      updates.expirationDate !== undefined &&
+      typeof updates.expirationDate === 'string'
+    ) {
       mappedUpdates.expirationDate = new Date(updates.expirationDate);
     }
-    if (updates.purchaseDate !== undefined && typeof updates.purchaseDate === 'string') {
+    if (
+      updates.purchaseDate !== undefined &&
+      typeof updates.purchaseDate === 'string'
+    ) {
       mappedUpdates.purchaseDate = new Date(updates.purchaseDate);
     }
 

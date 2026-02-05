@@ -53,6 +53,32 @@ export class KitTemplatesService {
     private readonly publicTemplatesService: PublicTemplatesService,
   ) {}
 
+  async getKitTemplatesPaginated(
+    userId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ data: KitTemplate[]; hasMore: boolean; page: number }> {
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Failed to get kit templates: ${error.message}`);
+    }
+
+    const list = (data || []).map(rowToKitTemplate);
+    return {
+      data: list,
+      hasMore: list.length === pageSize,
+      page,
+    };
+  }
+
   async getKitTemplates(userId: string): Promise<KitTemplate[]> {
     const { data, error } = await this.supabase
       .from('kit_templates')

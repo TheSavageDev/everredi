@@ -230,7 +230,7 @@ export class UserKitsService {
       .select('id, status')
       .eq('kit_id', kitId)
       .eq('tenant_id', tenantId)
-      .gt('required_quantity', 0);
+      .not('required_quantity', 'is', null);
 
     if (error || !items?.length) {
       return 'incomplete';
@@ -258,7 +258,7 @@ export class UserKitsService {
       .select('kit_id, status')
       .in('kit_id', kitIds)
       .eq('tenant_id', tenantId)
-      .gt('required_quantity', 0);
+      .not('required_quantity', 'is', null);
 
     if (error || !rows?.length) return result;
 
@@ -280,6 +280,61 @@ export class UserKitsService {
       );
     }
     return result;
+  }
+
+  async getUserKitsPaginated(
+    userId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ data: UserKit[]; hasMore: boolean; page: number }> {
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const { data: kitsData, error } = await this.supabase
+      .from('kits')
+      .select(
+        'id, name, location_id, status, notes, metadata, created_at, updated_at, is_osha_kit, osha_kit_type, osha_rule_id, compliance_status, compliance_score, last_compliance_check_at, compliance_metadata, locations(name)',
+      )
+      .eq('tenant_id', tenant.id)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Failed to get user kits: ${error.message}`);
+    }
+
+    const kits = kitsData || [];
+    const nonArchivedIds = kits
+      .filter((k: any) => k.status !== 'archived')
+      .map((k: any) => k.id);
+    const derivedStatus = await this.computeKitStatusFromItemsBatch(
+      tenant.id,
+      nonArchivedIds,
+    );
+
+    const data = kits.map((kit: any) => {
+      const status =
+        kit.status === 'archived'
+          ? kit.status
+          : (derivedStatus.get(kit.id) ?? kit.status);
+      return rowToUserKit({
+        ...kit,
+        status,
+        user_id: userId,
+        kit_template_id: (kit.metadata as any)?.kit_template_id,
+        kit_template_name: (kit.metadata as any)?.kit_template_name,
+        location_name: Array.isArray(kit.locations)
+          ? kit.locations[0]?.name
+          : (kit.locations as any)?.name,
+      });
+    });
+
+    return {
+      data,
+      hasMore: data.length === pageSize,
+      page,
+    };
   }
 
   async getUserKits(userId: string): Promise<UserKit[]> {
@@ -737,9 +792,9 @@ export class UserKitsService {
                 ? null
                 : item.supplyName || 'Unknown item',
               supply_name: item.supplyName || 'Unknown item',
-              required_quantity: requiredQuantity,
-              actual_quantity: 0,
-              status: 'missing',
+              required_quantity: requiredQuantity, // Required quantity for requirements
+              actual_quantity: 0, // Requirements have 0 actual quantity
+              status: 'missing', // Default status for requirements
               notes: (item as { notes?: string }).notes,
               created_at: now.toISOString(),
               updated_at: now.toISOString(),
@@ -1109,11 +1164,13 @@ export class UserKitsService {
     kitId: string,
     options?: { keepItems?: boolean },
   ): Promise<void> {
+    // Get user's tenant
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
 
+    // First, verify the kit exists and belongs to the tenant
     const { data: kit, error: kitCheckError } = await this.supabase
       .from('kits')
-      .select('id, location_id')
+      .select('id')
       .eq('id', kitId)
       .eq('tenant_id', tenant.id)
       .is('deleted_at', null)
@@ -1124,29 +1181,24 @@ export class UserKitsService {
     }
 
     if (options?.keepItems) {
-      // Detach items: set kit_id = NULL and set location_id from kit so items remain as standalone inventory
-      const detachUpdate: Record<string, unknown> = {
-        kit_id: null,
-        updated_at: new Date().toISOString(),
-      };
-      if (kit.location_id != null) {
-        detachUpdate.location_id = kit.location_id;
-      }
-      const { error: updateError } = await this.supabase
+      // Detach items from kit instead of deleting them
+      const { error: detachError } = await this.supabase
         .from('inventory_items')
-        .update(detachUpdate)
+        .update({
+          kit_id: null,
+          updated_at: new Date().toISOString(),
+        })
         .eq('kit_id', kitId)
         .eq('tenant_id', tenant.id);
 
-      if (updateError) {
+      if (detachError) {
         this.logger.error(
-          `Failed to detach items from kit ${kitId}: ${updateError.message}`,
+          `Failed to detach inventory items for kit ${kitId}: ${detachError.message}`,
         );
-        throw new Error(
-          `Failed to detach items from kit: ${updateError.message}`,
-        );
+        throw new Error(`Failed to detach kit items: ${detachError.message}`);
       }
-      this.logger.log(`Detached inventory items from kit ${kitId}`);
+
+      this.logger.log(`Detached inventory items for kit ${kitId}`);
     } else {
       // Delete all inventory items associated with this kit
       const { error: deleteItemsError } = await this.supabase
@@ -1163,6 +1215,7 @@ export class UserKitsService {
           `Failed to delete kit items: ${deleteItemsError.message}`,
         );
       }
+
       this.logger.log(`Deleted inventory items for kit ${kitId}`);
     }
 
@@ -1205,9 +1258,7 @@ export class UserKitsService {
     }
 
     this.logger.log(
-      options?.keepItems
-        ? `Successfully deleted kit ${kitId}; items kept as standalone inventory`
-        : `Successfully deleted kit ${kitId} and all associated items`,
+      `Successfully deleted kit ${kitId} and all associated items`,
     );
   }
 
@@ -1335,7 +1386,8 @@ export class UserKitsService {
       throw new NotFoundException('Kit not found');
     }
 
-    // Check if any inventory item already exists for this kit and supply (one row per kit+supply)
+    // Check if any inventory item already exists for this kit and supply
+    // (The unique constraint applies to kit_id + supply_id)
     let existingItem: any = null;
     if (itemData.supplyId && itemData.supplyId.trim() !== '') {
       const { data: existing } = await this.supabase
@@ -1347,6 +1399,7 @@ export class UserKitsService {
         .maybeSingle();
       existingItem = existing;
     } else {
+      // For items without supplyId, check by freeform_name
       const { data: existing } = await this.supabase
         .from('inventory_items')
         .select('id, required_quantity, actual_quantity')
@@ -1375,6 +1428,8 @@ export class UserKitsService {
           .maybeSingle();
         existingInventoryItem = existing;
       } else {
+        // For items without supplyId, check by freeform_name and kit_id
+        // Note: unique constraint doesn't apply when supply_id is NULL
         const { data: existing } = await this.supabase
           .from('inventory_items')
           .select('id, actual_quantity, required_quantity')
@@ -1488,9 +1543,12 @@ export class UserKitsService {
     let kitItemId: string;
 
     if (existingItem) {
-      // Update existing row (one row per kit+supply); preserve actual_quantity
+      // Update existing requirement
+      // Update requirement and set required_quantity
+      // Also update matching actual items' required_quantity (trigger will do this, but set explicitly)
       const updateData: any = {
-        required_quantity: requiredQty,
+        required_quantity: requiredQty, // Set required_quantity column
+        actual_quantity: 0, // Requirements have 0 actual quantity
         supply_name: itemData.supplyName,
         freeform_name: itemData.supplyId ? null : itemData.supplyName,
         notes: itemData.notes,
@@ -1502,6 +1560,18 @@ export class UserKitsService {
         .from('inventory_items')
         .update(updateData)
         .eq('id', existingItem.id);
+
+      // Update matching actual items' required_quantity
+      await this.supabase
+        .from('inventory_items')
+        .update({ required_quantity: requiredQty })
+        .eq('kit_id', userKitId)
+        .eq('tenant_id', tenant.id)
+        .or(
+          itemData.supplyId
+            ? `supply_id.eq.${itemData.supplyId}`
+            : `freeform_name.eq.${itemData.supplyName}`,
+        );
 
       // Fetch updated item
       const { data: updated, error: updateError } = await this.supabase
@@ -1522,11 +1592,12 @@ export class UserKitsService {
       // Note: If an inventory item already exists (from createInventoryItem above),
       // we should update it to also be a requirement, not create a duplicate
       if (inventoryItemId) {
-        // Update the existing row with required_quantity and metadata; preserve actual_quantity
+        // Update the existing inventory item to also serve as the requirement
         const { data: updated, error: updateError } = await this.supabase
           .from('inventory_items')
           .update({
-            required_quantity: requiredQty,
+            required_quantity: requiredQty, // Set required_quantity column
+            actual_quantity: 0, // Requirements have 0 actual quantity
             supply_name: itemData.supplyName,
             freeform_name: itemData.supplyId ? null : itemData.supplyName,
             notes: itemData.notes,
@@ -1545,7 +1616,7 @@ export class UserKitsService {
         // Read actual quantity directly from database column
         actualQty = updated.actual_quantity ?? 0;
       } else {
-        // Create new row (one per kit+supply)
+        // Create new requirement (no inventory item exists)
         const { data: newItem, error: createError } = await this.supabase
           .from('inventory_items')
           .insert({
@@ -1555,8 +1626,8 @@ export class UserKitsService {
             freeform_name: itemData.supplyId ? null : itemData.supplyName,
             supply_name: itemData.supplyName,
             location_id: kit.location_id,
-            required_quantity: requiredQty,
-            actual_quantity: 0,
+            required_quantity: requiredQty, // Set required_quantity column
+            actual_quantity: 0, // Requirements have 0 actual quantity
             status: status,
             notes: itemData.notes,
             created_at: now.toISOString(),
@@ -1606,18 +1677,18 @@ export class UserKitsService {
       | 'updatedAt'
     > & { actualQuantity?: number; createInventoryItem?: boolean },
   ): Promise<KitItemInstance> {
-    // Check if row already exists for this kit+supply (deprecated method - use createKitItemInstance instead)
+    // Check if requirement already exists (deprecated method - use createKitItemInstance instead)
     const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-    const existingQuery = this.supabase
+    const { data: existingItem } = await this.supabase
       .from('inventory_items')
       .select('id')
       .eq('kit_id', containerId)
-      .eq('tenant_id', tenant.id);
-    const { data: existingItem } = itemData.supplyId
-      ? await existingQuery.eq('supply_id', itemData.supplyId).maybeSingle()
-      : await existingQuery
-          .eq('freeform_name', itemData.supplyName)
-          .maybeSingle();
+      .eq('tenant_id', tenant.id)
+      .not('required_quantity', 'is', null)
+      .or(
+        `supply_id.eq.${itemData.supplyId || 'null'},freeform_name.eq.${itemData.supplyName || 'null'}`,
+      )
+      .single();
 
     let inventoryItemId: string | undefined;
     let actualQty = 0;
@@ -1740,7 +1811,7 @@ export class UserKitsService {
           supply_name: itemData.supplyName,
           location_id: container.location_id,
           required_quantity: requiredQty,
-          actual_quantity: 0,
+          actual_quantity: 0, // Requirements have 0 actual quantity
           status: status,
           notes: itemData.notes,
           created_at: now.toISOString(),
@@ -1880,8 +1951,8 @@ export class UserKitsService {
         freeform_name: itemData.supplyId ? null : itemData.supplyName,
         supply_name: itemData.supplyName,
         location_id: kit.location_id,
-        required_quantity: itemData.requiredQuantity,
-        actual_quantity: 0,
+        required_quantity: itemData.requiredQuantity, // Required quantity for requirements
+        actual_quantity: 0, // Requirements have 0 actual quantity
         status: status,
         notes: itemData.notes,
         created_at: now.toISOString(),
@@ -1970,8 +2041,8 @@ export class UserKitsService {
 
     const updateData: any = {
       actual_quantity: actualQuantity,
-      required_quantity: requiredQuantity,
-      status: status,
+      required_quantity: requiredQuantity ?? currentItem.required_quantity,
+      status: status, // Use calculated status directly (complete, partial, or missing)
       updated_at: new Date().toISOString(),
     };
 
@@ -2057,8 +2128,8 @@ export class UserKitsService {
     const itemData = rowToKitItem(sourceItem, actualQty);
     const now = new Date();
 
-    // Update the row's kit_id to the target kit
-    {
+    // If this item has actual quantity (actual item), update its kit_id to the target kit
+    if ((sourceItem.actual_quantity ?? 0) > 0) {
       try {
         await this.inventoryService.updateInventoryItem(userId, sourceItem.id, {
           kitId: targetKitId,
@@ -2124,7 +2195,7 @@ export class UserKitsService {
     // Verify item exists
     const { data: item, error: itemError } = await this.supabase
       .from('inventory_items')
-      .select('id')
+      .select('id, actual_quantity, required_quantity')
       .eq('id', itemId)
       .eq('kit_id', userKitId)
       .eq('tenant_id', tenant.id)
@@ -2132,6 +2203,15 @@ export class UserKitsService {
 
     if (itemError || !item) {
       throw new NotFoundException('Kit item instance not found');
+    }
+
+    // Actual items (have actual_quantity > 0) may want remove-from-kit instead of delete
+    if ((item.actual_quantity ?? 0) > 0) {
+      // For actual items, we might want to just remove from kit (set kit_id to null)
+      // instead of deleting. But for now, we'll delete if explicitly requested.
+      this.logger.warn(
+        `Deleting actual inventory item ${itemId} from kit ${userKitId}. Consider removing from kit instead.`,
+      );
     }
 
     const { error: deleteError } = await this.supabase
@@ -2164,13 +2244,13 @@ export class UserKitsService {
       throw new NotFoundException('Kit not found');
     }
 
-    // Get all kit items with required_quantity > 0
+    // Get all kit items with required_quantity set (requirements / placeholders)
     const { data: items, error: itemsError } = await this.supabase
       .from('inventory_items')
       .select('*')
       .eq('kit_id', userKitId)
       .eq('tenant_id', tenant.id)
-      .gt('required_quantity', 0);
+      .not('required_quantity', 'is', null);
 
     if (itemsError) {
       throw new Error(`Failed to fetch kit items: ${itemsError.message}`);
@@ -2186,7 +2266,8 @@ export class UserKitsService {
 
     // Set each item's actual_quantity to its required_quantity (mark kit as fully stocked)
     for (const item of items) {
-      const requiredQuantity = item.required_quantity ?? 0;
+      const requiredQuantity =
+        item.required_quantity ?? (item as any).actual_quantity ?? 0;
 
       const { error: updateError } = await this.supabase
         .from('inventory_items')

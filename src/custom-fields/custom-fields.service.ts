@@ -15,7 +15,6 @@ export interface CustomFieldDefinition {
   userId: string;
   name: string;
   type: CustomFieldType;
-  required: boolean;
   options?: string[]; // For dropdown type
   order: number;
   createdAt: Date;
@@ -34,7 +33,6 @@ function rowToCustomField(row: any): CustomFieldDefinition {
     userId: row.user_id,
     name: row.name,
     type: row.field_type,
-    required: row.is_required,
     options: row.options || undefined,
     order: row.order || 0,
     createdAt: new Date(row.created_at),
@@ -120,7 +118,6 @@ export class CustomFieldsService {
         user_id: userId,
         name: fieldData.name,
         field_type: fieldData.type,
-        is_required: fieldData.required,
         options: fieldData.options || null,
         order: fieldData.order ?? maxOrder + 1,
         created_at: now.toISOString(),
@@ -149,8 +146,6 @@ export class CustomFieldsService {
 
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.type !== undefined) updateData.field_type = updates.type;
-    if (updates.required !== undefined)
-      updateData.is_required = updates.required;
     if (updates.options !== undefined)
       updateData.options = updates.options || null;
     if (updates.order !== undefined) updateData.order = updates.order;

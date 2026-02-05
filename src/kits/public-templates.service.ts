@@ -59,6 +59,49 @@ export class PublicTemplatesService {
     private readonly usersService: UsersService,
   ) {}
 
+  async getPublicTemplatesPaginated(
+    page: number,
+    pageSize: number,
+    purpose?: string,
+    skillLevel?: string,
+    userId?: string,
+  ): Promise<{
+    data: PublicKitTemplate[];
+    hasMore: boolean;
+    page: number;
+  }> {
+    let query = this.supabase
+      .from('kit_templates')
+      .select('*')
+      .eq('is_public', true)
+      .eq('is_active', true);
+
+    if (purpose) {
+      query = query.eq('purpose', purpose);
+    }
+
+    if (skillLevel) {
+      query = query.eq('skill_level', skillLevel);
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Failed to get public templates: ${error.message}`);
+    }
+
+    const list = (data || []).map(rowToPublicTemplate);
+    return {
+      data: list,
+      hasMore: list.length === pageSize,
+      page,
+    };
+  }
+
   async getPublicTemplates(
     purpose?: string,
     skillLevel?: string,

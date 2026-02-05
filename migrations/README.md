@@ -29,7 +29,7 @@ The `inventory_items` table consolidates both kit items and inventory:
 
 - **Items in kits**: `kit_id` is set (not NULL)
 - **Items not in kits**: `kit_id` is NULL
-- **Requirements/placeholders**: `is_requirement = true`, `actual_quantity = 0`, `required_quantity > 0`
+- **Requirements/placeholders**: Inferred by `required_quantity` set and `actual_quantity = 0` (the `is_requirement` column was removed)
 - **All inventory tracking**: expiration, purchase info, custom fields, etc.
 
 This eliminates the dual relationship problem between `kit_items` and `inventory_items`.

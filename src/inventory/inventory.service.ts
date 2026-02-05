@@ -42,19 +42,26 @@ export interface InventoryItem {
   updatedAt: Date;
 }
 
-// Helper function to convert PostgreSQL row to InventoryItem
-function rowToInventoryItem(row: any): InventoryItem {
+// Helper function to convert PostgreSQL row to InventoryItem (optional kitNameMap for when not using join)
+function rowToInventoryItem(
+  row: any,
+  kitNameMap?: Map<string, string>,
+): InventoryItem {
   // Read actual_quantity and required_quantity directly from database columns
   const actualQty =
     row.actual_quantity !== undefined && row.actual_quantity !== null
       ? row.actual_quantity
-      : row.is_requirement
-        ? 0
-        : 0; // Default to 0 if not set
+      : 0;
   const requiredQty =
     row.required_quantity !== undefined && row.required_quantity !== null
       ? row.required_quantity
       : undefined;
+
+  const kitName =
+    kitNameMap?.get(row.kit_id) ??
+    row.kits?.name ??
+    row.kit?.name ??
+    row.kit_name;
 
   return {
     id: row.id,
@@ -65,7 +72,7 @@ function rowToInventoryItem(row: any): InventoryItem {
     locationId: row.location_id || '',
     locationName: row.location_name,
     kitId: row.kit_id,
-    kitName: row.kit_name,
+    kitName: kitName ?? undefined,
     // Use actual_quantity and required_quantity directly
     actualQuantity: actualQty,
     requiredQuantity: requiredQty,
@@ -123,39 +130,47 @@ export class InventoryService {
   }
 
   async getInventoryItems(userId: string): Promise<InventoryItem[]> {
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    // Include default tenant and all tenants the user is a member of (so we never miss the tenant with most items).
+    const defaultTenant =
+      await this.tenantsService.getUserDefaultTenant(userId);
+    const userTenants = await this.tenantsService.getUserTenants(userId);
+    const tenantIds = [
+      ...new Set([defaultTenant.id, ...userTenants.map((t) => t.id)]),
+    ];
 
-    // Get inventory items (no lots aggregation needed - each item is already a single lot)
-    const { data, error } = await this.supabase
-      .from('inventory_items')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false); // Only get actual items, not requirements
+    // Paginate with a small page size so we get all rows even when PostgREST max_rows is very low (e.g. 10–20).
+    const pageSize = 10;
+    let rows: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data, error } = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .in('tenant_id', tenantIds)
+        .range(offset, offset + pageSize - 1);
 
-    if (error) {
-      logger.error(`Error fetching inventory items: ${error.message}`);
-      throw new Error(`Failed to get inventory items: ${error.message}`);
+      if (error) {
+        logger.error(`Error fetching inventory items: ${error.message}`);
+        throw new Error(`Failed to get inventory items: ${error.message}`);
+      }
+      const chunk = data || [];
+      rows = rows.concat(chunk);
+      hasMore = chunk.length >= pageSize;
+      offset += chunk.length;
     }
 
     // Check for expired items and update their status
     const now = new Date();
     const lifecycleStates = ['used', 'disposed', 'expired'];
-    const expiredUpdates: Array<{ id: string; supply_name: string }> = [];
-
-    for (const item of data || []) {
-      if (
-        item.expiration_date &&
-        new Date(item.expiration_date) < now &&
-        !lifecycleStates.includes(item.status as string)
-      ) {
-        expiredUpdates.push({ id: item.id, supply_name: item.supply_name });
-      }
-    }
-
-    // Batch update expired items
-    if (expiredUpdates.length > 0) {
-      for (const update of expiredUpdates) {
+    const expiredWithTenant = (rows as any[]).filter(
+      (r) =>
+        r.expiration_date &&
+        new Date(r.expiration_date) < now &&
+        !lifecycleStates.includes(r.status),
+    );
+    if (expiredWithTenant.length > 0) {
+      for (const item of expiredWithTenant) {
         try {
           await this.supabase
             .from('inventory_items')
@@ -163,34 +178,73 @@ export class InventoryService {
               status: 'expired',
               updated_at: now.toISOString(),
             })
-            .eq('id', update.id)
-            .eq('tenant_id', tenant.id);
+            .eq('id', item.id)
+            .eq('tenant_id', item.tenant_id);
         } catch (updateError) {
           logger.warn(
-            `Failed to update expired status for item ${update.id}: ${updateError}`,
+            `Failed to update expired status for item ${item.id}: ${updateError}`,
           );
         }
       }
       logger.log(
-        `Updated ${expiredUpdates.length} items to expired status during getInventoryItems`,
+        `Updated ${expiredWithTenant.length} items to expired status during getInventoryItems`,
       );
     }
 
-    // Re-fetch items to get updated statuses
-    const { data: updatedData, error: refetchError } = await this.supabase
-      .from('inventory_items')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false);
+    // Re-fetch all items with same pagination (ensures we get every row and updated statuses).
+    let finalRows: any[] = rows;
+    let refetchRows: any[] = [];
+    let refetchOffset = 0;
+    let refetchHasMore = true;
+    while (refetchHasMore) {
+      const { data: updatedChunk, error: refetchError } = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .in('tenant_id', tenantIds)
+        .range(refetchOffset, refetchOffset + pageSize - 1);
+      if (refetchError) {
+        logger.error(
+          `Error refetching inventory items: ${refetchError.message}`,
+        );
+        break;
+      }
+      const chunk = updatedChunk || [];
+      refetchRows = refetchRows.concat(chunk);
+      refetchHasMore = chunk.length === pageSize;
+      refetchOffset += pageSize;
+    }
+    if (refetchRows.length > 0) finalRows = refetchRows;
 
-    if (refetchError) {
-      logger.error(`Error refetching inventory items: ${refetchError.message}`);
-      // Fall back to original data if refetch fails
-      return (data || []).map((item: any) => rowToInventoryItem(item));
+    // Fetch kit names for all distinct kit_ids (kits can be in any of the user's tenants)
+    const kitIds = [
+      ...new Set(
+        (finalRows as any[]).map((r: any) => r.kit_id).filter(Boolean),
+      ),
+    ] as string[];
+    const tenantIdsInRows = [
+      ...new Set((finalRows as any[]).map((r: any) => r.tenant_id)),
+    ] as string[];
+    let kitNameMap = new Map<string, string>();
+    if (kitIds.length > 0) {
+      const { data: kitsData } = await this.supabase
+        .from('kits')
+        .select('id, name')
+        .in('tenant_id', tenantIdsInRows)
+        .in('id', kitIds);
+      if (kitsData) {
+        kitNameMap = new Map(
+          kitsData.map((k: { id: string; name: string }) => [k.id, k.name]),
+        );
+      }
     }
 
-    // Convert rows to InventoryItem - columns are already populated by database
-    return (updatedData || []).map((item: any) => rowToInventoryItem(item));
+    const result = finalRows.map((item: any) =>
+      rowToInventoryItem(item, kitNameMap),
+    );
+    logger.log(
+      `getInventoryItems: returning ${result.length} items for ${tenantIds.length} tenant(s), unique kits: ${kitIds.length}`,
+    );
+    return result;
   }
 
   async getInventoryItem(
@@ -276,8 +330,13 @@ export class InventoryService {
     userId: string,
     itemData: Omit<
       InventoryItem,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'sentNotifications'
-    > & { kitId?: string }, // kit_id for items in kits (nullable)
+      | 'id'
+      | 'userId'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'sentNotifications'
+      | 'status'
+    > & { kitId?: string; status?: InventoryItem['status'] }, // status optional: computed from quantities when omitted
   ): Promise<InventoryItem> {
     const isPremium = await this.usersService.isPremiumUser(userId);
 
@@ -288,8 +347,7 @@ export class InventoryService {
       const { count, error: countError } = await this.supabase
         .from('inventory_items')
         .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id)
-        .eq('is_requirement', false); // Only count actual items, not requirements
+        .eq('tenant_id', tenant.id);
       if (countError) {
         logger.error(`Error counting inventory items: ${countError.message}`);
       }
@@ -400,7 +458,6 @@ export class InventoryService {
       supply_category_id: itemData.supplyCategoryId,
       location_id: itemData.locationId,
       location_name: itemData.locationName,
-      is_requirement: false, // This is an actual item, not a requirement
       status: calculatedStatus,
       expiration_date: expirationDate ? expirationDate.toISOString() : null,
       purchase_date: purchaseDate ? purchaseDate.toISOString() : null,
@@ -420,23 +477,22 @@ export class InventoryService {
       Object.entries(insertData).filter(([, value]) => value !== undefined),
     );
 
-    // If item is in a kit, lookup required_quantity from matching requirement
+    // If item is in a kit, lookup required_quantity from the single row for (kit, supply)
     if (kitId && !itemData.requiredQuantity) {
-      const { data: requirement } = await this.supabase
+      const { data: existing } = await this.supabase
         .from('inventory_items')
         .select('required_quantity')
         .eq('kit_id', kitId)
         .eq('tenant_id', tenant.id)
-        .eq('is_requirement', true)
         .or(
           itemData.supplyId
             ? `supply_id.eq.${itemData.supplyId}`
             : `freeform_name.eq.${itemData.supplyName}`,
         )
-        .single();
+        .maybeSingle();
 
-      if (requirement && requirement.required_quantity) {
-        filteredData.required_quantity = requirement.required_quantity;
+      if (existing?.required_quantity) {
+        filteredData.required_quantity = existing.required_quantity;
       }
     }
 
@@ -734,23 +790,53 @@ export class InventoryService {
     userId: string,
     term: string,
   ): Promise<InventoryItem[]> {
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const defaultTenant =
+      await this.tenantsService.getUserDefaultTenant(userId);
+    const userTenants = await this.tenantsService.getUserTenants(userId);
+    const tenantIds = [
+      ...new Set([defaultTenant.id, ...userTenants.map((t) => t.id)]),
+    ];
 
-    const { data, error } = await this.supabase
-      .from('inventory_items')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false); // Only search actual items, not requirements
-
-    if (error) {
-      logger.error(`Error fetching inventory items: ${error.message}`);
-      return [];
+    const searchPageSize = 10;
+    let rows: any[] = [];
+    let searchOffset = 0;
+    let searchHasMore = true;
+    while (searchHasMore) {
+      const { data, error } = await this.supabase
+        .from('inventory_items')
+        .select('*')
+        .in('tenant_id', tenantIds)
+        .range(searchOffset, searchOffset + searchPageSize - 1);
+      if (error) {
+        logger.error(`Error fetching inventory items: ${error.message}`);
+        return [];
+      }
+      const chunk = data || [];
+      rows = rows.concat(chunk);
+      searchHasMore = chunk.length >= searchPageSize;
+      searchOffset += chunk.length;
+    }
+    const kitIds = [
+      ...new Set(rows.map((r: any) => r.kit_id).filter(Boolean)),
+    ] as string[];
+    const tenantIdsInRows = [...new Set(rows.map((r: any) => r.tenant_id))];
+    let kitNameMap = new Map<string, string>();
+    if (kitIds.length > 0) {
+      const { data: kitsData } = await this.supabase
+        .from('kits')
+        .select('id, name')
+        .in('tenant_id', tenantIdsInRows)
+        .in('id', kitIds);
+      if (kitsData) {
+        kitNameMap = new Map(
+          kitsData.map((k: { id: string; name: string }) => [k.id, k.name]),
+        );
+      }
     }
 
     const searchTerm = term.toLowerCase();
-    return (data || [])
-      .map(rowToInventoryItem)
+    return rows
+      .map((item: any) => rowToInventoryItem(item, kitNameMap))
       .filter(
         (item) =>
           item.supplyName?.toLowerCase().includes(searchTerm) ||
@@ -774,7 +860,6 @@ export class InventoryService {
       .from('inventory_items')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false) // Only get actual items, not requirements
       .gte('expiration_date', now.toISOString())
       .lte('expiration_date', thresholdDate.toISOString())
       .order('expiration_date', { ascending: true });
@@ -784,7 +869,7 @@ export class InventoryService {
       return [];
     }
 
-    return (data || []).map(rowToInventoryItem);
+    return (data || []).map((row) => rowToInventoryItem(row));
   }
 
   async getExpiredItems(userId: string): Promise<InventoryItem[]> {
@@ -795,7 +880,6 @@ export class InventoryService {
       .from('inventory_items')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false) // Only get actual items, not requirements
       .eq('status', 'expired')
       .order('expiration_date', { ascending: true });
 
@@ -804,7 +888,7 @@ export class InventoryService {
       return [];
     }
 
-    return (data || []).map(rowToInventoryItem);
+    return (data || []).map((row) => rowToInventoryItem(row));
   }
 
   async getLowQuantityItems(
@@ -820,7 +904,6 @@ export class InventoryService {
       .from('inventory_items')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false) // Only get actual items, not requirements
       .gt('required_quantity', 0)
       .not('required_quantity', 'is', null);
 
@@ -835,7 +918,6 @@ export class InventoryService {
       .from('inventory_items')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .eq('is_requirement', false)
       .not('kit_id', 'is', null)
       .or('required_quantity.is.null,required_quantity.eq.0');
 
@@ -863,34 +945,16 @@ export class InventoryService {
       return [];
     }
 
-    // For items without required_quantity, try to get it from the matching requirement
-    // Batch lookup requirements for all kits
-    const kitIds = [
-      ...new Set(itemsArray.map((item) => item.kit_id).filter(Boolean)),
-    ];
+    // Build map: key = kit_id + supply_id/freeform, value = required_quantity (from same row)
     const requirementsMap = new Map<string, number>();
-
-    if (kitIds.length > 0) {
-      const { data: requirements, error: reqError } = await this.supabase
-        .from('inventory_items')
-        .select('kit_id, supply_id, freeform_name, required_quantity')
-        .eq('tenant_id', tenant.id)
-        .eq('is_requirement', true)
-        .in('kit_id', kitIds)
-        .gt('required_quantity', 0);
-
-      if (reqError) {
-        logger.warn(`Error fetching requirements: ${reqError.message}`);
-      } else if (requirements) {
-        // Build a map: key = kit_id + supply_id/freeform_name, value = required_quantity
-        requirements.forEach((req) => {
-          const key = req.supply_id
-            ? `${req.kit_id}:supply:${req.supply_id}`
-            : `${req.kit_id}:freeform:${req.freeform_name}`;
-          requirementsMap.set(key, req.required_quantity);
-        });
+    itemsArray.forEach((item) => {
+      if (item.kit_id && item.required_quantity && item.required_quantity > 0) {
+        const key = item.supply_id
+          ? `${item.kit_id}:supply:${item.supply_id}`
+          : `${item.kit_id}:freeform:${item.freeform_name}`;
+        requirementsMap.set(key, item.required_quantity);
       }
-    }
+    });
 
     // Enrich items with required_quantity from requirements if missing
     const enrichedItems = itemsArray.map((item) => {
@@ -942,6 +1006,6 @@ export class InventoryService {
       `Low quantity check: Found ${lowQuantityItems.length} low quantity items (threshold: ${thresholdPercent}%) out of ${enrichedItems.length} items checked (${itemsWithRequiredQty?.length || 0} with required_quantity, ${itemsInKits?.length || 0} in kits without)`,
     );
 
-    return lowQuantityItems.map(rowToInventoryItem);
+    return lowQuantityItems.map((row) => rowToInventoryItem(row));
   }
 }

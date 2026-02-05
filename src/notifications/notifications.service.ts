@@ -62,9 +62,6 @@ export class NotificationsService {
         message: notificationData.message,
         data: notificationData.data,
         is_read: notificationData.isRead,
-        sent_at: notificationData.sentAt
-          ? notificationData.sentAt.toISOString()
-          : null,
         created_at: now.toISOString(),
       })
       .select()

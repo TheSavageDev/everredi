@@ -13,6 +13,7 @@ import { AdvancedNotificationsService } from './advanced-notifications.service';
 import { ScheduledBroadcastsService } from './scheduled-broadcasts.service';
 import { LowStockNotificationsService } from './low-stock-notifications.service';
 import { UsersModule } from '../users/users.module';
+import { TenantsModule } from '../tenants/tenants.module';
 
 @Module({
   controllers: [
@@ -32,7 +33,7 @@ import { UsersModule } from '../users/users.module';
     ScheduledBroadcastsService,
     LowStockNotificationsService,
   ],
-  imports: [UsersModule],
+  imports: [UsersModule, TenantsModule],
   exports: [
     NotificationsService,
     NotificationGeneratorService,

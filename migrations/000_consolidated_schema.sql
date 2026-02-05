@@ -354,14 +354,14 @@ CREATE TRIGGER trg_kits_updated_at
 -- Consolidated Inventory Items
 -- =========================
 -- This table consolidates both kit_items and inventory_items
--- - Items in kits: kit_id is set
+-- - Items in kits: kit_id is set (deleting kit CASCADE deletes its items)
 -- - Items not in kits: kit_id is NULL
--- - Requirements/placeholders: is_requirement = true, actual_quantity = 0, required_quantity > 0
+-- - One row per item type; required/compliance from required_quantity vs actual_quantity
 
 CREATE TABLE IF NOT EXISTS inventory_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  kit_id UUID REFERENCES kits(id) ON DELETE SET NULL, -- NULL = not in a kit
+  kit_id UUID REFERENCES kits(id) ON DELETE CASCADE, -- NULL = not in a kit; kit delete removes items
   supply_id UUID REFERENCES supplies(id) ON DELETE SET NULL,
   freeform_name TEXT, -- Required if supply_id is NULL
   supply_name VARCHAR(255) NOT NULL, -- Denormalized for performance
@@ -373,7 +373,6 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   actual_quantity INTEGER NOT NULL DEFAULT 0 CHECK (actual_quantity >= 0), -- Actual quantity on hand
   required_quantity INTEGER CHECK (required_quantity >= 0), -- Required quantity (for kit items)
   lot_code TEXT, -- Lot/batch identifier (stored directly on item)
-  is_requirement BOOLEAN NOT NULL DEFAULT false, -- true = placeholder/requirement, false = actual item
   status VARCHAR(20) NOT NULL DEFAULT 'missing' CHECK (status IN ('complete', 'partial', 'missing')),
   
   -- Expiration tracking (stored directly on item, no separate lots table)
@@ -406,7 +405,6 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_kit_id ON inventory_items(kit_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_items_supply_id ON inventory_items(supply_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_location_id ON inventory_items(location_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_status ON inventory_items(status);
-CREATE INDEX IF NOT EXISTS idx_inventory_items_is_requirement ON inventory_items(is_requirement);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_actual_quantity ON inventory_items(actual_quantity) WHERE actual_quantity IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_inventory_items_required_quantity ON inventory_items(required_quantity) WHERE required_quantity IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_inventory_items_lot_code ON inventory_items(lot_code) WHERE lot_code IS NOT NULL;

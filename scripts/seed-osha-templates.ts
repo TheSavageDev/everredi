@@ -43,11 +43,21 @@ console.log(`📋 Using environment file: ${envFile}`);
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// Typical guidance: low-risk (Class A, general industry) = small kit for <25 → 10;
+// high-risk (Class B, construction, healthcare, etc.) = medium for 5–25 → 25.
+const PEOPLE_COUNT_OPTIONS_STEPS = [1, 2, 4, 6, 8, 12];
+
+function getPeopleCountOptions(groupSize: number): number[] {
+  return PEOPLE_COUNT_OPTIONS_STEPS.filter((x) => x < groupSize);
+}
+
 interface OshaTemplate {
   name: string;
   description: string;
   purpose: string;
   oshaKitType: string;
+  /** Typical guidance: 10 = small/low-risk, 25 = medium/high-risk. */
+  groupSize?: number;
   items: Array<{
     supplyName: string;
     quantity: number;
@@ -62,6 +72,7 @@ const oshaTemplates: OshaTemplate[] = [
       'ANSI Z308.1-2021 Class A compliant first aid kit for low-risk environments with smaller workforces. Addresses common workplace injuries like cuts, burns, and sprains.',
     purpose: 'osha-class-a',
     oshaKitType: 'class_a',
+    groupSize: 10, // low-risk, small kit
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 16 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 4 },
@@ -84,6 +95,7 @@ const oshaTemplates: OshaTemplate[] = [
       'ANSI Z308.1-2021 Class B compliant comprehensive first aid kit for high-risk environments or larger operations. Contains all Class A supplies plus additional items for more severe injuries.',
     purpose: 'osha-class-b',
     oshaKitType: 'class_b',
+    groupSize: 25, // high-risk, medium kit
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 32 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 8 },
@@ -109,6 +121,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for construction sites. Based on OSHA 1926.50 and ANSI Z308.1-2021 Class B with construction-specific additions including eye wash solution.',
     purpose: 'osha-construction',
     oshaKitType: 'construction',
+    groupSize: 25, // high-risk
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 32 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 8 },
@@ -135,6 +148,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for general industry workplaces. Based on OSHA 1910.151 and ANSI Z308.1-2021 Class A requirements.',
     purpose: 'osha-general-industry',
     oshaKitType: 'general_industry',
+    groupSize: 10, // Class A type, low-risk
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 16 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 4 },
@@ -157,6 +171,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for healthcare facilities, medical offices, and clinics. Includes supplies for bloodborne pathogen protection, sharps injuries, and medical emergencies.',
     purpose: 'osha-healthcare',
     oshaKitType: 'healthcare',
+    groupSize: 25, // higher risk
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 32 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 8 },
@@ -181,6 +196,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for restaurants, kitchens, and food service establishments. Emphasizes burn treatment, cuts, and food-safe wound care supplies.',
     purpose: 'osha-food-service',
     oshaKitType: 'food_service',
+    groupSize: 10,
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 24 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 6 },
@@ -206,6 +222,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for warehouses, distribution centers, and logistics facilities. Designed for high-occupancy areas with material handling equipment and heavy lifting operations.',
     purpose: 'osha-warehouse',
     oshaKitType: 'warehouse',
+    groupSize: 25,
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 40 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 10 },
@@ -230,6 +247,7 @@ const oshaTemplates: OshaTemplate[] = [
       'OSHA-compliant first aid kit for manufacturing facilities and industrial settings. Includes supplies for machine-related injuries, chemical exposure, and eye protection needs.',
     purpose: 'osha-manufacturing',
     oshaKitType: 'manufacturing',
+    groupSize: 25,
     items: [
       { supplyName: 'Gauze pads (4x4 inches)', quantity: 40 },
       { supplyName: 'Gauze pads (8x10 inches)', quantity: 10 },
@@ -463,6 +481,7 @@ async function seedOshaTemplates() {
       }
     } else {
       // Create template
+      const groupSize = template.groupSize ?? 10;
       const { data: templateData, error: templateError } = await supabase
         .from('kit_templates')
         .insert({
@@ -470,7 +489,7 @@ async function seedOshaTemplates() {
           name: template.name,
           description: template.description,
           purpose: template.purpose,
-          group_size: 1,
+          group_size: groupSize,
           environment: 'indoor',
           skill_level: 'beginner',
           is_public: true,
@@ -478,8 +497,8 @@ async function seedOshaTemplates() {
           requires_premium: true, // Premium template
           created_by: 'system',
           is_active: true,
-          default_people_count: 1,
-          people_count_options: [],
+          default_people_count: groupSize,
+          people_count_options: getPeopleCountOptions(groupSize),
         })
         .select()
         .single();

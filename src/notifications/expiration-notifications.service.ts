@@ -8,12 +8,12 @@ import { PushNotificationService } from './push-notification.service';
 import { NotificationsService } from './notifications.service';
 import { UsersService } from '../users/users.service';
 import { AdvancedNotificationsService } from './advanced-notifications.service';
+import { TenantsService } from '../tenants/tenants.service';
 
 const logger = new Logger('ExpirationNotificationsService');
 
 interface InventoryItem {
   id: string;
-  user_id: string;
   supply_name: string;
   expiration_date?: string;
   status: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
@@ -31,6 +31,7 @@ export class ExpirationNotificationsService {
     private readonly usersService: UsersService,
     private readonly advancedNotificationsService: AdvancedNotificationsService,
     private readonly emailService: EmailService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   /**
@@ -80,16 +81,14 @@ export class ExpirationNotificationsService {
 
         const isPremium = await this.usersService.isPremiumUser(userId);
 
-        // Get active inventory items with expiration dates
-        const { data: items, error: itemsError } = await this.supabase
-          .from('inventory_items')
-          .select('*')
-          .eq('user_id', userId)
-          .not('expiration_date', 'is', null);
-
-        if (itemsError) {
+        // Get active inventory items with expiration dates.
+        // Supports both old (user_id column) and new (tenant_id column) schemas.
+        let items: InventoryItem[] = [];
+        try {
+          items = await this.getUserInventoryItems(userId);
+        } catch (itemsError: any) {
           logger.error(
-            `Error getting items for user ${userId}: ${itemsError.message}`,
+            `Error getting items for user ${userId}: ${itemsError?.message || itemsError}`,
           );
           continue;
         }
@@ -122,8 +121,7 @@ export class ExpirationNotificationsService {
                   status: 'expired',
                   updated_at: now.toISOString(),
                 })
-                .eq('id', item.id)
-                .eq('user_id', userId);
+                .eq('id', item.id);
 
               totalExpiredUpdated++;
               logger.log(
@@ -162,15 +160,12 @@ export class ExpirationNotificationsService {
               }
               try {
                 await this.sendExpirationNotification(
+                  userId,
                   item,
                   thresholdDays,
                   daysUntilExpiration,
                 );
-                await this.markNotificationAsSent(
-                  item.id,
-                  userId,
-                  thresholdDays,
-                );
+                await this.markNotificationAsSent(item.id, thresholdDays);
                 totalNotificationsSent++;
                 remindersCreatedForUser++;
                 logger.log(
@@ -197,6 +192,48 @@ export class ExpirationNotificationsService {
   }
 
   /**
+   * Get inventory items with expiration dates for a user.
+   * Tries user_id-based schema first; falls back to tenant_id-based schema.
+   */
+  private async getUserInventoryItems(
+    userId: string,
+  ): Promise<InventoryItem[]> {
+    // Try old schema where inventory_items has a user_id column
+    const { data, error } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('user_id', userId)
+      .not('expiration_date', 'is', null);
+
+    if (!error) {
+      return (data || []) as InventoryItem[];
+    }
+
+    // If error is not about the user_id column missing, rethrow
+    if (
+      error.code !== '42703' && // undefined_column
+      !error.message?.includes('column') &&
+      !error.message?.includes('user_id')
+    ) {
+      throw error;
+    }
+
+    // New consolidated schema: use tenant_id instead
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const { data: tenantItems, error: tenantError } = await this.supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .not('expiration_date', 'is', null);
+
+    if (tenantError) {
+      throw tenantError;
+    }
+
+    return (tenantItems || []) as InventoryItem[];
+  }
+
+  /**
    * Check if a notification for a specific day threshold has already been sent
    */
   private hasNotificationBeenSent(
@@ -212,14 +249,12 @@ export class ExpirationNotificationsService {
    */
   private async markNotificationAsSent(
     itemId: string,
-    userId: string,
     alertDays: number,
   ): Promise<void> {
     const { data: item } = await this.supabase
       .from('inventory_items')
       .select('sent_notifications')
       .eq('id', itemId)
-      .eq('user_id', userId)
       .single();
 
     if (!item) {
@@ -234,14 +269,14 @@ export class ExpirationNotificationsService {
       .update({
         sent_notifications: updatedSent,
       })
-      .eq('id', itemId)
-      .eq('user_id', userId);
+      .eq('id', itemId);
   }
 
   /**
    * Send expiration notification for an item
    */
   private async sendExpirationNotification(
+    userId: string,
     item: InventoryItem,
     alertDays: number,
     actualDaysUntilExpiration: number,
@@ -251,12 +286,11 @@ export class ExpirationNotificationsService {
         ? '1 day'
         : `${actualDaysUntilExpiration} days`;
 
-    const pushEnabled = await this.advancedNotificationsService.isPushEnabled(
-      item.user_id,
-    );
+    const pushEnabled =
+      await this.advancedNotificationsService.isPushEnabled(userId);
     if (pushEnabled) {
       await this.pushNotificationService.sendExpirationNotification(
-        item.user_id,
+        userId,
         item.supply_name,
         actualDaysUntilExpiration,
         item.id,
@@ -264,7 +298,7 @@ export class ExpirationNotificationsService {
     }
 
     // Create in-app notification
-    await this.notificationsService.createNotification(item.user_id, {
+    await this.notificationsService.createNotification(userId, {
       type: 'expiration',
       title: 'Item Expiring Soon',
       message: `${item.supply_name} expires in ${daysText}`,
@@ -280,10 +314,10 @@ export class ExpirationNotificationsService {
     if (this.emailService.isConfigured()) {
       const prefs =
         await this.advancedNotificationsService.getNotificationPreferences(
-          item.user_id,
+          userId,
         );
       if (prefs?.emailEnabled) {
-        const user = await this.usersService.getUserById(item.user_id);
+        const user = await this.usersService.getUserById(userId);
         if (user?.email) {
           this.emailService
             .sendExpirationNotificationEmail(

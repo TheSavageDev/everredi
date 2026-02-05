@@ -123,19 +123,10 @@ export class ComplianceService {
       }
     }
 
-    // Get kit items (requirements and actual items)
+    // Get kit items (one row per item type; compliance = actual_quantity vs required)
     const { data: kitItems, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        supply_id,
-        freeform_name,
-        is_requirement,
-        quantity,
-        actual_quantity,
-        required_quantity
-      `,
-      )
+      .select('supply_id, freeform_name, actual_quantity, required_quantity')
       .eq('kit_id', userKitId);
 
     if (itemsError) {
@@ -355,19 +346,10 @@ export class ComplianceService {
       );
     }
 
-    // Get kit items
+    // Get kit items (one row per item type; compliance = actual_quantity vs required)
     const { data: kitItems, error: itemsError } = await this.supabase
       .from('inventory_items')
-      .select(
-        `
-        supply_id,
-        freeform_name,
-        is_requirement,
-        quantity,
-        actual_quantity,
-        required_quantity
-      `,
-      )
+      .select('supply_id, freeform_name, actual_quantity, required_quantity')
       .eq('kit_id', kitId);
 
     if (itemsError) {

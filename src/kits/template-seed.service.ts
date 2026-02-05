@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE } from '../config/supabase.provider';
 import { PublicTemplatesService } from './public-templates.service';
 import { KitTemplatesService } from './kit-templates.service';
+import { getDefaultPeopleCountOptions } from './utils/people-count-options';
 import { SuppliesService } from '../supplies/supplies.service';
 import { SupplyCategoriesService } from '../supply-categories/supply-categories.service';
 import type { SupplyCategory } from '../supply-categories/supply-categories.service';
@@ -402,7 +403,10 @@ export class TemplateSeedService {
         // Create the public template first
         const publicTemplate =
           await this.publicTemplatesService.createPublicTemplate({
-            defaultPeopleCount: 1,
+            defaultPeopleCount: template.groupSize,
+            peopleCountOptions: getDefaultPeopleCountOptions(
+              template.groupSize,
+            ),
             name: template.name,
             description: template.description,
             purpose: template.purpose,

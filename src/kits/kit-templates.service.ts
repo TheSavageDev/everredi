@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
 import { PublicTemplatesService } from './public-templates.service';
+import { getDefaultPeopleCountOptions } from './utils/people-count-options';
 
 export interface KitTemplate {
   id: string;
@@ -105,8 +106,11 @@ export class KitTemplatesService {
         is_ai_generated: templateData.isAiGenerated,
         ai_prompt: templateData.aiPrompt,
         requires_premium: templateData.requiresPremium || false,
-        default_people_count: templateData.defaultPeopleCount ?? 1,
-        people_count_options: templateData.peopleCountOptions,
+        default_people_count:
+          templateData.defaultPeopleCount ?? templateData.groupSize,
+        people_count_options:
+          templateData.peopleCountOptions ??
+          getDefaultPeopleCountOptions(templateData.groupSize),
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       })
@@ -165,17 +169,25 @@ export class KitTemplatesService {
     };
 
     if (updates.name !== undefined) updateData.name = updates.name;
-    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.description !== undefined)
+      updateData.description = updates.description;
     if (updates.purpose !== undefined) updateData.purpose = updates.purpose;
-    if (updates.groupSize !== undefined) updateData.group_size = updates.groupSize;
-    if (updates.environment !== undefined) updateData.environment = updates.environment;
-    if (updates.skillLevel !== undefined) updateData.skill_level = updates.skillLevel;
+    if (updates.groupSize !== undefined)
+      updateData.group_size = updates.groupSize;
+    if (updates.environment !== undefined)
+      updateData.environment = updates.environment;
+    if (updates.skillLevel !== undefined)
+      updateData.skill_level = updates.skillLevel;
     if (updates.isPublic !== undefined) updateData.is_public = updates.isPublic;
-    if (updates.isAiGenerated !== undefined) updateData.is_ai_generated = updates.isAiGenerated;
+    if (updates.isAiGenerated !== undefined)
+      updateData.is_ai_generated = updates.isAiGenerated;
     if (updates.aiPrompt !== undefined) updateData.ai_prompt = updates.aiPrompt;
-    if (updates.requiresPremium !== undefined) updateData.requires_premium = updates.requiresPremium;
-    if (updates.defaultPeopleCount !== undefined) updateData.default_people_count = updates.defaultPeopleCount;
-    if (updates.peopleCountOptions !== undefined) updateData.people_count_options = updates.peopleCountOptions;
+    if (updates.requiresPremium !== undefined)
+      updateData.requires_premium = updates.requiresPremium;
+    if (updates.defaultPeopleCount !== undefined)
+      updateData.default_people_count = updates.defaultPeopleCount;
+    if (updates.peopleCountOptions !== undefined)
+      updateData.people_count_options = updates.peopleCountOptions;
 
     // Update the user template
     const { data: updatedTemplate, error: updateError } = await this.supabase
@@ -311,6 +323,13 @@ export class KitTemplatesService {
       return Math.ceil(item.requiredQuantity * multiplier);
     }
 
+    // If selected people count differs from default, scale base quantity proportionally
+    // (template quantities are stored for the default people count)
+    if (selectedPeopleCount !== defaultPeopleCount) {
+      const multiplier = selectedPeopleCount / defaultPeopleCount;
+      return Math.ceil(item.requiredQuantity * multiplier);
+    }
+
     // Otherwise, use base requiredQuantity unchanged
     return item.requiredQuantity;
   }
@@ -343,20 +362,58 @@ export class KitTemplatesService {
     const defaultPeopleCount = templateData.defaultPeopleCount ?? 1;
     const peopleCount = selectedPeopleCount ?? defaultPeopleCount;
 
-    // Get template items
-    const { data: items, error: itemsError } = await this.supabase
+    // Prefer revision items (consolidated schema); fall back to kit_template_items if no revision
+    const { data: revision } = await this.supabase
+      .from('kit_template_revisions')
+      .select('id')
+      .eq('kit_template_id', templateId)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (revision?.id) {
+      const { data: items, error: itemsError } = await this.supabase
+        .from('kit_template_revision_items')
+        .select('*')
+        .eq('template_revision_id', revision.id)
+        .order('sort_order', { ascending: true });
+
+      if (!itemsError && items?.length) {
+        return items.map((item: any) => {
+          const baseQuantity = item.required_units ?? 0;
+          const requiredQuantity = this.calculateItemQuantity(
+            {
+              requiredQuantity: baseQuantity,
+              scalesWithPeople: item.scales_with_people,
+              peopleCountQuantities:
+                item.people_count_units ?? item.people_count_quantities,
+            },
+            peopleCount,
+            defaultPeopleCount,
+          );
+          const supplyId = item.supply_id ?? item.supplyId ?? null;
+          return {
+            supplyId,
+            supplyName: item.supply_name ?? item.supplyName ?? 'Unknown item',
+            requiredQuantity,
+            notes: item.notes,
+          };
+        });
+      }
+    }
+
+    // Fallback: legacy kit_template_items (may not exist in consolidated schema)
+    const { data: legacyItems, error: legacyError } = await this.supabase
       .from('kit_template_items')
       .select('*')
       .eq('kit_template_id', templateId)
       .order('sort_order', { ascending: true });
 
-    if (itemsError) {
-      throw new Error(`Failed to get template items: ${itemsError.message}`);
+    if (legacyError) {
+      return [];
     }
 
-    return (items || []).map((item: any) => {
-      // For old schema (kit_template_items), read from quantity column
-      // For new schema (kit_template_revision_items), read from required_units column
+    return (legacyItems || []).map((item: any) => {
       const baseQuantity = item.required_units ?? item.quantity ?? 0;
       const requiredQuantity = this.calculateItemQuantity(
         {
@@ -367,12 +424,109 @@ export class KitTemplatesService {
         peopleCount,
         defaultPeopleCount,
       );
+      const supplyId = item.supply_id ?? item.supplyId ?? null;
       return {
-        supplyId: item.supply_id,
-        supplyName: item.supply_name,
+        supplyId,
+        supplyName: item.supply_name ?? item.supplyName ?? 'Unknown item',
         requiredQuantity,
         notes: item.notes,
       };
     });
+  }
+
+  async saveTemplateItems(
+    userId: string,
+    templateId: string,
+    items: Array<{
+      supplyId: string;
+      supplyName?: string;
+      requiredQuantity: number;
+      notes?: string;
+      sortOrder?: number;
+    }>,
+  ): Promise<void> {
+    const { data: template, error: templateError } = await this.supabase
+      .from('kit_templates')
+      .select('id')
+      .eq('id', templateId)
+      .eq('user_id', userId)
+      .single();
+
+    if (templateError || !template) {
+      throw new NotFoundException('Kit template not found');
+    }
+
+    const now = new Date();
+
+    // Get or create latest revision
+    const { data: existingRevision } = await this.supabase
+      .from('kit_template_revisions')
+      .select('id, version')
+      .eq('kit_template_id', templateId)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (items.length === 0) {
+      if (existingRevision?.id) {
+        await this.supabase
+          .from('kit_template_revision_items')
+          .delete()
+          .eq('template_revision_id', existingRevision.id);
+      }
+      return;
+    }
+
+    let revisionId: string;
+    if (existingRevision?.id) {
+      revisionId = existingRevision.id;
+      await this.supabase
+        .from('kit_template_revision_items')
+        .delete()
+        .eq('template_revision_id', revisionId);
+    } else {
+      const { data: newRevision, error: revError } = await this.supabase
+        .from('kit_template_revisions')
+        .insert({
+          kit_template_id: templateId,
+          version: 1,
+          created_by: userId,
+          created_at: now.toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (revError || !newRevision?.id) {
+        throw new Error(
+          `Failed to create template revision: ${revError?.message || 'Unknown error'}`,
+        );
+      }
+      revisionId = newRevision.id;
+    }
+
+    const revisionItems = items
+      .filter((item) => item.supplyId?.trim())
+      .map((item, index) => ({
+        template_revision_id: revisionId,
+        supply_id: item.supplyId.trim(),
+        required_units: Math.max(0, item.requiredQuantity ?? 0),
+        sort_order: item.sortOrder ?? index,
+        notes: item.notes?.trim() || null,
+        scales_with_people: false,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      }));
+
+    if (revisionItems.length === 0) {
+      return;
+    }
+
+    const { error: insertError } = await this.supabase
+      .from('kit_template_revision_items')
+      .insert(revisionItems);
+
+    if (insertError) {
+      throw new Error(`Failed to save template items: ${insertError.message}`);
+    }
   }
 }

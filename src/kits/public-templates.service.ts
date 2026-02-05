@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SUPABASE } from '../config/supabase.provider';
 import { UsersService } from '../users/users.service';
+import { getDefaultPeopleCountOptions } from './utils/people-count-options';
 
 export interface PublicKitTemplate {
   id: string;
@@ -144,8 +145,11 @@ export class PublicTemplatesService {
         requires_premium: templateData.requiresPremium || false,
         created_by: templateData.createdBy,
         public_template_id: templateData.publicTemplateId,
-        default_people_count: templateData.defaultPeopleCount ?? 1,
-        people_count_options: templateData.peopleCountOptions,
+        default_people_count:
+          templateData.defaultPeopleCount ?? templateData.groupSize,
+        people_count_options:
+          templateData.peopleCountOptions ??
+          getDefaultPeopleCountOptions(templateData.groupSize),
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       })
@@ -261,6 +265,13 @@ export class PublicTemplatesService {
       return Math.ceil(item.quantity * multiplier);
     }
 
+    // If selected people count differs from default, scale base quantity proportionally
+    // (template quantities are stored for the default people count)
+    if (selectedPeopleCount !== defaultPeopleCount) {
+      const multiplier = selectedPeopleCount / defaultPeopleCount;
+      return Math.ceil(item.quantity * multiplier);
+    }
+
     // Otherwise, use base quantity unchanged
     return item.quantity;
   }
@@ -351,10 +362,10 @@ export class PublicTemplatesService {
       items = revisionItems || [];
     }
 
-    // Get all supply IDs to fetch supply names
+    // Get all supply IDs to fetch supply names (templates are catalog-based)
     const supplyIds = items
-      .map((item: any) => item.supply_id)
-      .filter((id: string | null) => id !== null) as string[];
+      .map((item: any) => item.supply_id ?? item.supplyId)
+      .filter((id: string | null | undefined) => id != null) as string[];
 
     // Fetch supply names in batch
     const supplyNamesMap = new Map<string, string>();
@@ -386,13 +397,14 @@ export class PublicTemplatesService {
         defaultPeopleCount,
       );
 
-      // Get supply name from the map, or use the stored supply_name
-      const supplyName = item.supply_id
-        ? supplyNamesMap.get(item.supply_id) || item.supply_name
-        : item.supply_name;
+      // Templates are built from the supply catalog; supply_id is NOT NULL in kit_template_revision_items
+      const supplyId = item.supply_id ?? item.supplyId ?? null;
+      const supplyName = supplyId
+        ? supplyNamesMap.get(supplyId) || item.supply_name || item.supplyName
+        : (item.supply_name ?? item.supplyName);
 
       return {
-        supplyId: item.supply_id,
+        supplyId,
         supplyName,
         quantity, // This is the required quantity (may be 0 if template has 0, but usually should be > 0)
         notes: item.notes,

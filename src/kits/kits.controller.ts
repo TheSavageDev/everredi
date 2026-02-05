@@ -1,3 +1,5 @@
+import { appendFileSync } from 'fs';
+import { join } from 'path';
 import {
   Controller,
   Get,
@@ -10,12 +12,14 @@ import {
   UseGuards,
   Logger,
 } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { KitTemplatesService, KitTemplate } from './kit-templates.service';
 import { UserKitsService, UserKit } from './user-kits.service';
 import { PublicTemplatesService } from './public-templates.service';
+import { CreateUserKitFromTemplateDto } from './dto/create-user-kit-from-template.dto';
 
 @Controller('kits')
 @UseGuards(SupabaseAuthGuard)
@@ -91,6 +95,33 @@ export class KitsController {
       success: true,
       data: template,
       message: 'Kit template retrieved successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Put(':id/items')
+  async saveTemplateItems(
+    @CurrentUser() user: { uid: string },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      items: Array<{
+        supplyId: string;
+        supplyName?: string;
+        requiredQuantity: number;
+        notes?: string;
+        sortOrder?: number;
+      }>;
+    },
+  ) {
+    await this.templatesService.saveTemplateItems(
+      user.uid,
+      id,
+      body.items ?? [],
+    );
+    return {
+      success: true,
+      message: 'Template items saved successfully',
       timestamp: new Date().toISOString(),
     };
   }
@@ -173,77 +204,131 @@ export class UserKitsController {
   @Post('from-template')
   async createUserKitFromTemplate(
     @CurrentUser() user: { uid: string },
-    @Body()
-    body: {
-      templateId: string;
-      templateName: string;
-      locationId: string;
-      locationName?: string;
-      includeItems: boolean;
-      isPublicTemplate?: boolean;
-      selectedPeopleCount?: number;
-    },
+    @Body(
+      new ValidationPipe({
+        whitelist: false,
+        forbidNonWhitelisted: false,
+        transform: true,
+      }),
+    )
+    body: CreateUserKitFromTemplateDto,
   ) {
+    this.logger.warn(
+      `[FROM-TEMPLATE] *** ENDPOINT HIT *** templateId=${body.templateId}, includeItems=${body.includeItems}, isPublicTemplate=${body.isPublicTemplate}`,
+    );
     this.logger.log(
       `Creating kit from template: ${body.templateId}, isPublicTemplate: ${body.isPublicTemplate}, includeItems: ${body.includeItems}`,
     );
+    const bodyRecord = body as unknown as Record<string, unknown>;
+    const receivedKeys = Object.keys(bodyRecord);
+    this.logger.log(
+      `[FROM-TEMPLATE] body keys: ${receivedKeys.join(', ')}, templateItems type=${typeof bodyRecord.templateItems}, isArray=${Array.isArray(bodyRecord.templateItems)}, length=${(bodyRecord.templateItems as unknown[])?.length ?? 'n/a'}`,
+    );
 
-    // Always get template items (for both empty and fully loaded kits)
-    let templateItems:
-      | Array<{
-          supplyId: string;
-          supplyName?: string;
-          requiredQuantity: number;
-          notes?: string;
-        }>
-      | undefined;
+    // #region agent log
+    try {
+      const logLine =
+        JSON.stringify({
+          location: 'kits.controller.ts:createUserKitFromTemplate',
+          message: 'Backend received body',
+          data: {
+            includeItems: body.includeItems,
+            templateItemsLength: body.templateItems?.length ?? -1,
+            templateItemsIsArray: Array.isArray(body.templateItems),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H4',
+        }) + '\n';
+      const paths = [
+        join(process.cwd(), '.cursor', 'debug.log'),
+        join(process.cwd(), '..', '.cursor', 'debug.log'),
+        '/Users/jasonsavage/projects/.cursor/debug.log',
+      ];
+      for (const logPath of paths) {
+        try {
+          appendFileSync(logPath, logLine);
+          break;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    // #endregion
 
-    if (body.isPublicTemplate) {
-      // For public templates, get items directly from the public template
-      try {
+    type TemplateItem = {
+      supplyId: string;
+      supplyName?: string;
+      requiredQuantity: number;
+      notes?: string;
+    };
+
+    let templateItems: TemplateItem[];
+
+    const resolveFromBackend = async (): Promise<TemplateItem[]> => {
+      if (body.isPublicTemplate) {
         const publicItems =
           await this.publicTemplatesService.getPublicTemplateItems(
             body.templateId,
             body.selectedPeopleCount,
           );
         this.logger.log(
-          `Retrieved ${publicItems.length} items from public template ${body.templateId}`,
+          `[FROM-TEMPLATE] Fallback: retrieved ${publicItems.length} items from public template ${body.templateId}`,
         );
-        // Map quantity to requiredQuantity
-        templateItems = publicItems.map((item) => ({
-          supplyId: item.supplyId,
+        return publicItems.map((item) => ({
+          supplyId: item.supplyId ?? '',
           supplyName: item.supplyName,
           requiredQuantity: item.quantity,
           notes: item.notes,
         }));
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(
-          `Failed to get items from public template: ${errorMessage}`,
-          error instanceof Error ? error.stack : undefined,
-        );
-        templateItems = [];
-      }
-    } else {
-      // For user templates, get items from the template
-      try {
-        templateItems = await this.templatesService.getTemplateItems(
+      } else {
+        const items = await this.templatesService.getTemplateItems(
           user.uid,
           body.templateId,
           body.selectedPeopleCount,
         );
         this.logger.log(
-          `Retrieved ${templateItems.length} items from user template ${body.templateId}`,
+          `[FROM-TEMPLATE] Fallback: retrieved ${items.length} items from user template ${body.templateId}`,
         );
+        return items;
+      }
+    };
+
+    const rawBody = body as unknown as Record<string, unknown>;
+    const bodyItemsRaw = Array.isArray(body.templateItems)
+      ? body.templateItems
+      : Array.isArray(rawBody.template_items)
+        ? rawBody.template_items
+        : [];
+    const bodyItems: TemplateItem[] = bodyItemsRaw.map(
+      (item: Record<string, unknown>) => ({
+        supplyId: String(item.supplyId ?? item.supply_id ?? ''),
+        supplyName: (item.supplyName ?? item.supply_name) as string | undefined,
+        requiredQuantity: Number(
+          item.requiredQuantity ?? item.required_quantity ?? 0,
+        ),
+        notes: (item.notes as string | undefined) ?? undefined,
+      }),
+    );
+
+    if (body.includeItems && bodyItems.length > 0) {
+      templateItems = bodyItems;
+      this.logger.log(
+        `[FROM-TEMPLATE] Using ${templateItems.length} template items from request body`,
+      );
+    } else if (body.includeItems) {
+      try {
+        templateItems = await resolveFromBackend();
       } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        const errorStack = error instanceof Error ? error.stack : undefined;
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(
-          `Failed to get template items for template ${body.templateId}: ${errorMessage}`,
-          errorStack,
+          `[FROM-TEMPLATE] Fallback failed: ${errMsg}`,
+          error instanceof Error ? error.stack : undefined,
         );
+        templateItems = [];
+      }
+    } else {
+      try {
+        templateItems = await resolveFromBackend();
+      } catch {
         templateItems = [];
       }
     }
@@ -251,6 +336,31 @@ export class UserKitsController {
     this.logger.log(
       `Template items to create: ${templateItems?.length || 0}, first item: ${JSON.stringify(templateItems?.[0] || null)}`,
     );
+
+    // #region agent log
+    try {
+      const logLine =
+        JSON.stringify({
+          location: 'kits.controller.ts:afterResolveTemplateItems',
+          message: 'Template items resolved',
+          data: { templateItemsLength: templateItems?.length ?? -1 },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H5',
+        }) + '\n';
+      const paths = [
+        join(process.cwd(), '.cursor', 'debug.log'),
+        join(process.cwd(), '..', '.cursor', 'debug.log'),
+        '/Users/jasonsavage/projects/.cursor/debug.log',
+      ];
+      for (const logPath of paths) {
+        try {
+          appendFileSync(logPath, logLine);
+          break;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    // #endregion
 
     const kit = await this.userKitsService.createUserKitFromTemplate(
       user.uid,
@@ -499,8 +609,13 @@ export class UserKitsController {
   async deleteUserKit(
     @CurrentUser() user: { uid: string },
     @Param('id') id: string,
+    @Query('keepItems') keepItems?: string,
   ) {
-    await this.userKitsService.deleteUserKit(user.uid, id);
+    const keepItemsOption =
+      keepItems === 'true' || keepItems === '1' ? true : undefined;
+    await this.userKitsService.deleteUserKit(user.uid, id, {
+      keepItems: keepItemsOption,
+    });
     return {
       success: true,
       message: 'User kit deleted successfully',

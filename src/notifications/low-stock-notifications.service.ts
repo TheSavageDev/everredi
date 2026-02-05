@@ -11,6 +11,7 @@ import {
   AdvancedNotificationsService,
   type LowStockAlert,
 } from './advanced-notifications.service';
+import { TenantsService } from '../tenants/tenants.service';
 
 const logger = new Logger('LowStockNotificationsService');
 const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -24,6 +25,7 @@ export class LowStockNotificationsService {
     private readonly usersService: UsersService,
     private readonly advancedNotificationsService: AdvancedNotificationsService,
     private readonly emailService: EmailService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   /**
@@ -99,20 +101,49 @@ export class LowStockNotificationsService {
     userId: string,
     supplyId: string,
   ): Promise<number> {
-    const { data: rows, error } = await this.supabase
+    // Try old schema where inventory_items has a user_id column
+    const { data, error } = await this.supabase
       .from('inventory_items')
       .select('actual_quantity')
       .eq('user_id', userId)
       .eq('supply_id', supplyId);
 
-    if (error) {
+    if (!error) {
+      const total = (data || []).reduce(
+        (sum, row) => sum + (Number(row.actual_quantity) || 0),
+        0,
+      );
+      return total;
+    }
+
+    // If error is not about the user_id column missing, log and bail
+    if (
+      error.code !== '42703' && // undefined_column
+      !error.message?.includes('column') &&
+      !error.message?.includes('user_id')
+    ) {
       logger.warn(
         `Failed to sum quantity for user ${userId} supply ${supplyId}: ${error.message}`,
       );
       return 0;
     }
 
-    const total = (rows || []).reduce(
+    // New consolidated schema: use tenant_id instead
+    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const { data: tenantRows, error: tenantError } = await this.supabase
+      .from('inventory_items')
+      .select('actual_quantity')
+      .eq('tenant_id', tenant.id)
+      .eq('supply_id', supplyId);
+
+    if (tenantError) {
+      logger.warn(
+        `Failed to sum quantity for tenant ${tenant.id} supply ${supplyId}: ${tenantError.message}`,
+      );
+      return 0;
+    }
+
+    const total = (tenantRows || []).reduce(
       (sum, row) => sum + (Number(row.actual_quantity) || 0),
       0,
     );

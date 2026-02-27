@@ -399,17 +399,18 @@ export class InventoryService {
       | 'sentNotifications'
       | 'status'
     > & { kitId?: string; status?: InventoryItem['status'] }, // status optional: computed from quantities when omitted
+    options?: { tenantIdOverride?: string },
   ): Promise<InventoryItem> {
     const isPremium = await this.usersService.isPremiumUser(userId);
 
     if (!isPremium) {
-      // Get user's tenant for scoping
-      const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+      // Get user's tenant for scoping (count against caller's limit, not override)
+      const tenantForCount = await this.tenantsService.getUserDefaultTenant(userId);
 
       const { count, error: countError } = await this.supabase
         .from('inventory_items')
         .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id);
+        .eq('tenant_id', tenantForCount.id);
       if (countError) {
         logger.error(`Error counting inventory items: ${countError.message}`);
       }
@@ -432,8 +433,10 @@ export class InventoryService {
     const expirationDate = this.convertToDate(itemData.expirationDate);
     const purchaseDate = this.convertToDate(itemData.purchaseDate);
 
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    // Resolve tenant: use override when creating item in a shared kit (caller has edit via kit_acl)
+    const tenant = options?.tenantIdOverride
+      ? { id: options.tenantIdOverride }
+      : await this.tenantsService.getUserDefaultTenant(userId);
 
     // Use kitId directly (containers table was removed)
     let kitId = (itemData as any).kitId || (itemData as any).containerId;

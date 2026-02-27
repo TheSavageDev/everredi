@@ -218,6 +218,56 @@ export class UserKitsService {
   ) {}
 
   /**
+   * Resolve kit access: returns kit id and tenant id if the user can access the kit
+   * (as owner via tenant, or as shared editor via kit_acl with edit/admin).
+   * When requireEdit is true, only returns when user has edit or admin permission.
+   */
+  private async getKitIdAndTenantIdIfAccessible(
+    userId: string,
+    kitId: string,
+    requireEdit: boolean,
+  ): Promise<{ kitId: string; tenantId: string } | null> {
+    const trimmedUserId = userId?.trim();
+    const trimmedKitId = kitId?.trim();
+    if (!trimmedUserId || !trimmedKitId) return null;
+
+    const tenant = await this.tenantsService.getUserDefaultTenant(trimmedUserId);
+
+    const { data: kit, error: kitError } = await this.supabase
+      .from('kits')
+      .select('id, tenant_id')
+      .eq('id', trimmedKitId)
+      .eq('tenant_id', tenant.id)
+      .is('deleted_at', null)
+      .single();
+
+    if (!kitError && kit) {
+      return { kitId: trimmedKitId, tenantId: kit.tenant_id };
+    }
+
+    const { data: acl, error: aclError } = await this.supabase
+      .from('kit_acl')
+      .select('kit_id')
+      .eq('kit_id', trimmedKitId)
+      .eq('subject_type', 'user')
+      .eq('subject_id', trimmedUserId)
+      .in('permission', requireEdit ? ['edit', 'admin'] : ['view', 'edit', 'admin'])
+      .single();
+
+    if (aclError || !acl) return null;
+
+    const { data: sharedKit, error: sharedKitError } = await this.supabase
+      .from('kits')
+      .select('id, tenant_id')
+      .eq('id', trimmedKitId)
+      .is('deleted_at', null)
+      .single();
+
+    if (sharedKitError || !sharedKit) return null;
+    return { kitId: trimmedKitId, tenantId: sharedKit.tenant_id };
+  }
+
+  /**
    * Compute kit status from requirement items: complete if all requirement items are complete, else incomplete.
    * Used for non-archived kits so status reflects item fulfillment.
    */
@@ -1370,41 +1420,44 @@ export class UserKitsService {
       | 'updatedAt'
     > & { actualQuantity?: number; createInventoryItem?: boolean },
   ): Promise<KitItemInstance> {
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const access = await this.getKitIdAndTenantIdIfAccessible(
+      userId,
+      userKitId,
+      true,
+    );
+    if (!access) {
+      throw new NotFoundException('Kit not found');
+    }
+    const { tenantId } = access;
 
-    // Get kit to verify it exists and get location
+    // Get kit to get location_id and name
     const { data: kit, error: kitError } = await this.supabase
       .from('kits')
       .select('id, location_id, tenant_id, name')
       .eq('id', userKitId)
-      .eq('tenant_id', tenant.id)
-      .is('deleted_at', null)
       .single();
 
     if (kitError || !kit) {
       throw new NotFoundException('Kit not found');
     }
 
-    // Check if any inventory item already exists for this kit and supply
-    // (The unique constraint applies to kit_id + supply_id)
+    // Check if any inventory item already exists for this kit and supply (use kit's tenant)
     let existingItem: any = null;
     if (itemData.supplyId && itemData.supplyId.trim() !== '') {
       const { data: existing } = await this.supabase
         .from('inventory_items')
         .select('id, required_quantity, actual_quantity')
         .eq('kit_id', userKitId)
-        .eq('tenant_id', tenant.id)
+        .eq('tenant_id', tenantId)
         .eq('supply_id', itemData.supplyId)
         .maybeSingle();
       existingItem = existing;
     } else {
-      // For items without supplyId, check by freeform_name
       const { data: existing } = await this.supabase
         .from('inventory_items')
         .select('id, required_quantity, actual_quantity')
         .eq('kit_id', userKitId)
-        .eq('tenant_id', tenant.id)
+        .eq('tenant_id', tenantId)
         .eq('freeform_name', itemData.supplyName)
         .is('supply_id', null)
         .maybeSingle();
@@ -1478,6 +1531,7 @@ export class UserKitsService {
                 ? new Date((itemData as any).expirationDate)
                 : undefined,
             } as any,
+            { tenantIdOverride: tenantId },
           );
           inventoryItemId = inventoryItem.id;
           actualQty =
@@ -1566,7 +1620,7 @@ export class UserKitsService {
         .from('inventory_items')
         .update({ required_quantity: requiredQty })
         .eq('kit_id', userKitId)
-        .eq('tenant_id', tenant.id)
+        .eq('tenant_id', tenantId)
         .or(
           itemData.supplyId
             ? `supply_id.eq.${itemData.supplyId}`
@@ -1620,7 +1674,7 @@ export class UserKitsService {
         const { data: newItem, error: createError } = await this.supabase
           .from('inventory_items')
           .insert({
-            tenant_id: tenant.id,
+            tenant_id: tenantId,
             kit_id: userKitId,
             supply_id: itemData.supplyId || null,
             freeform_name: itemData.supplyId ? null : itemData.supplyName,
@@ -1981,29 +2035,23 @@ export class UserKitsService {
       notes?: string;
     },
   ): Promise<KitItemInstance> {
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-
-    // Verify kit exists
-    const { data: kit, error: kitError } = await this.supabase
-      .from('kits')
-      .select('id')
-      .eq('id', userKitId)
-      .eq('tenant_id', tenant.id)
-      .is('deleted_at', null)
-      .single();
-
-    if (kitError || !kit) {
+    const access = await this.getKitIdAndTenantIdIfAccessible(
+      userId,
+      userKitId,
+      true,
+    );
+    if (!access) {
       throw new NotFoundException('Kit not found');
     }
+    const { tenantId } = access;
 
-    // Get current item
+    // Get current item (scoped to kit's tenant so shared editors can update)
     const { data: currentItem, error: itemError } = await this.supabase
       .from('inventory_items')
       .select('*')
       .eq('id', itemId)
       .eq('kit_id', userKitId)
-      .eq('tenant_id', tenant.id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (itemError || !currentItem) {
@@ -2060,6 +2108,8 @@ export class UserKitsService {
       .from('inventory_items')
       .update(updateData)
       .eq('id', itemId)
+      .eq('kit_id', userKitId)
+      .eq('tenant_id', tenantId)
       .select('*')
       .single();
 
@@ -2082,16 +2132,27 @@ export class UserKitsService {
       throw new Error('Cannot move item to the same kit');
     }
 
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
+    const accessSource = await this.getKitIdAndTenantIdIfAccessible(
+      userId,
+      sourceKitId,
+      true,
+    );
+    const accessTarget = await this.getKitIdAndTenantIdIfAccessible(
+      userId,
+      targetKitId,
+      true,
+    );
+    if (!accessSource) {
+      throw new NotFoundException('Source kit not found');
+    }
+    if (!accessTarget) {
+      throw new NotFoundException('Target kit not found');
+    }
 
-    // Verify both kits exist
     const { data: sourceKit, error: sourceError } = await this.supabase
       .from('kits')
       .select('id, location_id, name')
       .eq('id', sourceKitId)
-      .eq('tenant_id', tenant.id)
-      .is('deleted_at', null)
       .single();
 
     if (sourceError || !sourceKit) {
@@ -2102,21 +2163,19 @@ export class UserKitsService {
       .from('kits')
       .select('id, location_id, name')
       .eq('id', targetKitId)
-      .eq('tenant_id', tenant.id)
-      .is('deleted_at', null)
       .single();
 
     if (targetError || !targetKit) {
       throw new NotFoundException('Target kit not found');
     }
 
-    // Get the item from source kit
+    // Get the item from source kit (use source tenant)
     const { data: sourceItem, error: itemError } = await this.supabase
       .from('inventory_items')
       .select('*')
       .eq('id', itemId)
       .eq('kit_id', sourceKitId)
-      .eq('tenant_id', tenant.id)
+      .eq('tenant_id', accessSource.tenantId)
       .single();
 
     if (itemError || !sourceItem) {
@@ -2128,8 +2187,9 @@ export class UserKitsService {
     const itemData = rowToKitItem(sourceItem, actualQty);
     const now = new Date();
 
-    // If this item has actual quantity (actual item), update its kit_id to the target kit
-    if ((sourceItem.actual_quantity ?? 0) > 0) {
+    // If this item has actual quantity (actual item), update via InventoryService only when caller is owner (same tenant)
+    const userTenant = await this.tenantsService.getUserDefaultTenant(userId);
+    if ((sourceItem.actual_quantity ?? 0) > 0 && accessSource.tenantId === userTenant.id) {
       try {
         await this.inventoryService.updateInventoryItem(userId, sourceItem.id, {
           kitId: targetKitId,
@@ -2148,15 +2208,18 @@ export class UserKitsService {
       }
     }
 
-    // Update kit_id to move to target kit
+    // Update kit_id, location_id, and tenant_id (so item belongs to target kit's tenant)
     const { data: updatedItem, error: updateError } = await this.supabase
       .from('inventory_items')
       .update({
         kit_id: targetKitId,
         location_id: targetKit.location_id,
+        tenant_id: accessTarget.tenantId,
         updated_at: now.toISOString(),
       })
       .eq('id', itemId)
+      .eq('kit_id', sourceKitId)
+      .eq('tenant_id', accessSource.tenantId)
       .select('*')
       .single();
 
@@ -2176,21 +2239,15 @@ export class UserKitsService {
     userKitId: string,
     itemId: string,
   ): Promise<void> {
-    // Get user's tenant
-    const tenant = await this.tenantsService.getUserDefaultTenant(userId);
-
-    // Verify kit exists
-    const { data: kit, error: kitError } = await this.supabase
-      .from('kits')
-      .select('id')
-      .eq('id', userKitId)
-      .eq('tenant_id', tenant.id)
-      .is('deleted_at', null)
-      .single();
-
-    if (kitError || !kit) {
+    const access = await this.getKitIdAndTenantIdIfAccessible(
+      userId,
+      userKitId,
+      true,
+    );
+    if (!access) {
       throw new NotFoundException('Kit not found');
     }
+    const { tenantId } = access;
 
     // Verify item exists
     const { data: item, error: itemError } = await this.supabase
@@ -2198,7 +2255,7 @@ export class UserKitsService {
       .select('id, actual_quantity, required_quantity')
       .eq('id', itemId)
       .eq('kit_id', userKitId)
-      .eq('tenant_id', tenant.id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (itemError || !item) {
@@ -2217,7 +2274,9 @@ export class UserKitsService {
     const { error: deleteError } = await this.supabase
       .from('inventory_items')
       .delete()
-      .eq('id', itemId);
+      .eq('id', itemId)
+      .eq('kit_id', userKitId)
+      .eq('tenant_id', tenantId);
 
     if (deleteError) {
       throw new Error(`Failed to delete kit item: ${deleteError.message}`);

@@ -9,6 +9,7 @@ export interface ApiKey {
   userId: string;
   name: string;
   keyHash: string; // Hashed version of the key
+  usageCount?: number;
   lastUsed?: Date;
   createdAt: Date;
   expiresAt?: Date;
@@ -22,6 +23,7 @@ function rowToApiKey(row: any): ApiKey {
     userId: row.user_id,
     name: row.name,
     keyHash: row.key_hash,
+    usageCount: row.usage_count ?? undefined,
     lastUsed: row.last_used_at ? new Date(row.last_used_at) : undefined,
     createdAt: new Date(row.created_at),
     expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
@@ -118,7 +120,7 @@ export class ApiKeysService {
     }
 
     return {
-      usageCount: 0, // TODO: Implement usage tracking
+      usageCount: data.usage_count ?? 0,
       lastUsed: data.last_used_at ? new Date(data.last_used_at) : undefined,
     };
   }
@@ -131,7 +133,7 @@ export class ApiKeysService {
     // Search for matching hash in api_keys table
     const { data, error } = await this.supabase
       .from('api_keys')
-      .select('id, user_id, expires_at, is_active')
+      .select('id, user_id, expires_at, is_active, usage_count')
       .eq('key_hash', keyHash)
       .eq('is_active', true)
       .single();
@@ -145,11 +147,12 @@ export class ApiKeysService {
       return null;
     }
 
-    // Update last used
+    // Update last used and increment usage counter
     await this.supabase
       .from('api_keys')
       .update({
         last_used_at: new Date().toISOString(),
+        usage_count: (data.usage_count ?? 0) + 1,
       })
       .eq('id', data.id);
 

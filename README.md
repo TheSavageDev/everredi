@@ -109,7 +109,12 @@ npm run lint
 
 # Format code
 npm run format
+
+# Type-check (no emit)
+npm run typecheck
 ```
+
+TypeScript is configured with `strictNullChecks`, `noImplicitAny`, and `strictBindCallApply` enabled. New code should compile cleanly under `npm run typecheck` without adding new `any`/`unknown` usages except in narrow, well-justified escape hatches (for example, around external SDK payloads that are runtime-validated first).
 
 ## Project Structure
 

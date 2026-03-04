@@ -20,7 +20,7 @@ describe('ComplianceService', () => {
   it('returns an empty list of compliance checks for a new user', async () => {
     // Mock empty compliance checks
     (supabaseMock._setMockData as jest.Mock)('compliance_checks', []);
-    
+
     const checks = await service.getComplianceChecks('user-1');
     expect(Array.isArray(checks)).toBe(true);
     expect(checks.length).toBe(0);

@@ -10,56 +10,6 @@ process.env.STRIPE_SECRET_KEY =
   process.env.STRIPE_SECRET_KEY || 'sk_test_dummy';
 process.env.STRIPE_WEBHOOK_SECRET =
   process.env.STRIPE_WEBHOOK_SECRET || 'whsec_dummy';
-process.env.FIREBASE_PROJECT_ID =
-  process.env.FIREBASE_PROJECT_ID || 'everredi-dev-test';
-
-// Mock firebase-admin so we never hit real Firebase in tests
-jest.mock('firebase-admin', () => {
-  const auth = {
-    verifyIdToken: jest.fn().mockResolvedValue({
-      uid: 'test-user',
-      email: 'test@example.com',
-    }),
-  };
-
-  const firestore = {
-    collection: jest.fn().mockReturnThis(),
-    doc: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    get: jest.fn().mockResolvedValue({
-      size: 0,
-      docs: [],
-      exists: false,
-      data: () => ({}),
-      id: 'doc-id',
-    }),
-    set: jest.fn().mockResolvedValue(undefined),
-    update: jest.fn().mockResolvedValue(undefined),
-    add: jest.fn().mockResolvedValue({
-      id: 'doc-id',
-      get: jest.fn().mockResolvedValue({
-        id: 'doc-id',
-        data: () => ({}),
-      }),
-    }),
-  };
-
-  return {
-    __esModule: true,
-    initializeApp: jest.fn().mockReturnValue({}),
-    getApps: jest.fn().mockReturnValue([]),
-    getApp: jest.fn().mockReturnValue({}),
-    applicationDefault: jest.fn(),
-    credential: {
-      cert: jest.fn(),
-    },
-    auth: () => auth,
-    firestore: () => firestore,
-    // Re-export types shape placeholders where needed
-  };
-});
 
 // Mock @google/generative-ai to avoid real network calls
 jest.mock('@google/generative-ai', () => {

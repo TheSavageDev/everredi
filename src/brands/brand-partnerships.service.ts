@@ -38,7 +38,9 @@ export class BrandPartnershipsService {
    *
    * @returns Promise resolving to array of active BrandPartnership objects
    */
-  async getActivePartnerships(): Promise<BrandPartnership[]> {
+  async getActivePartnerships(
+    _categoryIds?: string[],
+  ): Promise<BrandPartnership[]> {
     const { data, error } = await this.supabase
       .from('brand_partnerships')
       .select('*')
@@ -115,10 +117,14 @@ export class BrandPartnershipsService {
       updated_at: new Date().toISOString(),
     };
 
-    if (updates.brandName !== undefined) updateData.brand_name = updates.brandName;
-    if (updates.contactEmail !== undefined) updateData.contact_email = updates.contactEmail;
-    if (updates.contactName !== undefined) updateData.contact_name = updates.contactName;
-    if (updates.partnershipType !== undefined) updateData.partnership_type = updates.partnershipType;
+    if (updates.brandName !== undefined)
+      updateData.brand_name = updates.brandName;
+    if (updates.contactEmail !== undefined)
+      updateData.contact_email = updates.contactEmail;
+    if (updates.contactName !== undefined)
+      updateData.contact_name = updates.contactName;
+    if (updates.partnershipType !== undefined)
+      updateData.partnership_type = updates.partnershipType;
     if (updates.status !== undefined) updateData.status = updates.status;
     if (updates.notes !== undefined) updateData.notes = updates.notes;
 

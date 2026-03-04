@@ -303,9 +303,7 @@ export class ComplianceService {
       .eq('id', kitId);
 
     if (error) {
-      throw new Error(
-        `Failed to update kit compliance: ${error.message}`,
-      );
+      throw new Error(`Failed to update kit compliance: ${error.message}`);
     }
 
     return check;

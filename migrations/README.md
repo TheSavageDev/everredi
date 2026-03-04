@@ -18,7 +18,6 @@ This is the **single source of truth** for new database installations. It includ
 - **Consolidated inventory_items** - Merges `kit_items` and old `inventory_items` into a single table
 - **Direct kits table** - No containers abstraction, no user_kits table
 - **Multi-tenancy** - Full tenant support via `tenants` and `tenant_members` tables
-- **No firebase_uid** - Fully migrated to Supabase authentication
 - **All indexes, triggers, views** - Complete schema with all optimizations
 
 ### Key Design Decisions
@@ -74,6 +73,7 @@ psql -h your-supabase-host -U postgres -d your-database -f 001_seed_supply_catal
 #### `001_seed_supply_catalog.sql`
 
 This seed file populates the supply catalog with:
+
 - **10 supply categories**: Bandages & Wound Care, Medications & Ointments, Tools & Instruments, Emergency & Trauma, Personal Protection, Hygiene & Sanitation, Burn Care, Cold & Heat Therapy, Respiratory, and Documentation & Reference
 - **50+ common first aid supplies**: Including bandages, medications, tools, emergency supplies, PPE, and more
 - **Supply variants**: Examples of size variants for adhesive bandages and nitrile gloves
@@ -88,11 +88,9 @@ If you have an existing database that was migrated incrementally, **do not** run
 
 The following migrations are kept for historical reference but should **not** be run on new installations:
 
-- **001-010**: Initial schema creation (with firebase_uid)
 - **011**: AI recommendations
 - **012-022**: Redesign (containers, lots, revisions, etc.)
 - **023-025**: Simplification (remove containers)
-- **999**: Cleanup (remove firebase_uid)
 
 All of these changes are included in `000_consolidated_schema.sql` in their final form.
 

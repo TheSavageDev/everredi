@@ -1,8 +1,8 @@
 {
   "name": "everredi-api",
-  "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "version": "1.0.0",
+  "description": "EverRedi API",
+  "author": "TheSavageDev",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -28,7 +28,7 @@
     "get-token": "ts-node -r tsconfig-paths/register scripts/get-token.ts",
     "migrate": "ts-node -r tsconfig-paths/register scripts/run-migrations.ts",
     "migrate:psql": "ts-node -r tsconfig-paths/register scripts/run-migrations-psql.ts",
-    "migrate:redesign": "ts-node -r tsconfig-paths/register scripts/run-migrations-batched.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google-cloud/tasks": "^5.5.2",
@@ -44,7 +44,6 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "date-fns": "^4.1.0",
-    "firebase-admin": "^13.6.0",
     "reflect-metadata": "^0.2.2",
     "resend": "^6.9.1",
     "rxjs": "^7.8.1",

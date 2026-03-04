@@ -25,7 +25,11 @@ describe('UsersService', () => {
     (supabaseMock._setMockData as jest.Mock)('users', []);
     (supabaseMock._setMockData as jest.Mock)('locations', []);
 
-    const result = await service.createOrUpdateUser('uid', 'test@example.com', 'Test User');
+    const result = await service.createOrUpdateUser(
+      'uid',
+      'test@example.com',
+      'Test User',
+    );
 
     expect(supabaseMock.from).toHaveBeenCalledWith('users');
     expect(result).toBeDefined();
@@ -42,12 +46,18 @@ describe('UsersService', () => {
     };
 
     // Mock: user exists
+    const select = jest.fn().mockReturnThis();
+    const eq = jest.fn().mockReturnThis();
+    const single = jest
+      .fn()
+      .mockResolvedValue({ data: existingUser, error: null });
+    const update = jest.fn().mockReturnThis();
+
     (supabaseMock.from as jest.Mock).mockReturnValue({
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({ data: existingUser, error: null }),
-      update: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
+      select,
+      eq,
+      single,
+      update,
     });
 
     await service.createOrUpdateUser('uid', 'new@example.com', undefined);
@@ -108,11 +118,13 @@ describe('UsersService', () => {
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
       // Mock Supabase query for finding referrer
-      (supabaseMock._setMockData as jest.Mock)('users', [{
-        id: 'referrer1',
-        referral_code: 'REFCODE123',
-        referral_rewards: null,
-      }]);
+      (supabaseMock._setMockData as jest.Mock)('users', [
+        {
+          id: 'referrer1',
+          referral_code: 'REFCODE123',
+          referral_rewards: null,
+        },
+      ]);
 
       const result = await service.applyReferralCode('user1', 'REFCODE123');
 
@@ -176,10 +188,12 @@ describe('UsersService', () => {
       jest.spyOn(service, 'getUserById').mockResolvedValue(user);
 
       // Mock Supabase query - finds same user
-      (supabaseMock._setMockData as jest.Mock)('users', [{
-        id: 'user1', // Same user
-        referral_code: 'MYCODE123',
-      }]);
+      (supabaseMock._setMockData as jest.Mock)('users', [
+        {
+          id: 'user1', // Same user
+          referral_code: 'MYCODE123',
+        },
+      ]);
 
       const result = await service.applyReferralCode('user1', 'MYCODE123');
 

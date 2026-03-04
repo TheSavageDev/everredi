@@ -12,13 +12,13 @@ import { resolve } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
 
 // Load environment variables
 // Try .env.development first, then fall back to .env
-const envFile = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV
-  ? '.env.development'
-  : '.env';
+const envFile =
+  process.env.NODE_ENV === 'development' || !process.env.NODE_ENV
+    ? '.env.development'
+    : '.env';
 config({ path: resolve(__dirname, `../${envFile}`) });
 // Also load .env as fallback for any missing variables
 config({ path: resolve(__dirname, '../.env') });
@@ -143,7 +143,7 @@ async function runMigration(filePath: string): Promise<void> {
     apikey: SUPABASE_SECRET_KEY || '',
     Authorization: `Bearer ${SUPABASE_SECRET_KEY || ''}`,
   };
-  
+
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/exec_sql`, {
     method: 'POST',
     headers,

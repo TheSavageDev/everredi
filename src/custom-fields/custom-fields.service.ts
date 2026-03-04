@@ -16,6 +16,11 @@ export interface CustomFieldDefinition {
   name: string;
   type: CustomFieldType;
   options?: string[]; // For dropdown type
+  /**
+   * Whether this field is required when filling out data.
+   * Optional in the type to allow legacy records that don't store this flag.
+   */
+  required?: boolean;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -34,6 +39,7 @@ function rowToCustomField(row: any): CustomFieldDefinition {
     name: row.name,
     type: row.field_type,
     options: row.options || undefined,
+    required: row.required ?? undefined,
     order: row.order || 0,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -100,8 +106,8 @@ export class CustomFieldsService {
     userId: string,
     fieldData: Omit<
       CustomFieldDefinition,
-      'id' | 'userId' | 'createdAt' | 'updatedAt'
-    >,
+      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'order'
+    > & { order?: number },
   ): Promise<CustomFieldDefinition> {
     const now = new Date();
 

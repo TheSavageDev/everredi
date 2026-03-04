@@ -337,7 +337,7 @@ export class UsersService {
   }
 
   /**
-   * Get subscription status from RevenueCat table (migrated from Firestore)
+   * Get subscription status from RevenueCat table
    * Falls back to user document if RevenueCat data not available
    */
   private async getRevenueCatSubscriptionFromSupabase(userId: string): Promise<{

@@ -1,19 +1,4 @@
 -- =========================
--- Consolidated Database Schema
--- =========================
--- This is a clean-slate migration representing the final database state
--- after Firebase to Supabase migration and schema consolidation
---
--- Key changes:
--- - No firebase_uid column (removed)
--- - Consolidated inventory_items table (merges kit_items and inventory_items)
--- - Direct kits table (no containers abstraction, no user_kits)
--- - Multi-tenancy support via tenants
--- - All deprecated tables removed
---
--- For new installations only. Existing databases should use incremental migrations.
-
--- =========================
 -- Utility Functions
 -- =========================
 
@@ -54,7 +39,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Core Tables
 -- =========================
 
--- Users table (no firebase_uid)
+-- Users table
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email VARCHAR(255) UNIQUE NOT NULL,

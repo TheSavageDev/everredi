@@ -86,7 +86,7 @@ export class SharingService {
           kit_id: kitId.trim(),
           subject_type: 'user',
           subject_id: trimmedSharedWithUserId,
-          permission: permission as 'view' | 'edit',
+          permission: permission,
           created_at: now.toISOString(),
         },
         {
@@ -107,7 +107,8 @@ export class SharingService {
       .eq('id', kitId.trim())
       .single();
 
-    const ownerIdFromKit = (kitData?.tenants as any)?.owner_user_id || ownerIdStr.trim();
+    const ownerIdFromKit =
+      (kitData?.tenants as any)?.owner_user_id || ownerIdStr.trim();
 
     return {
       id: share.id,
@@ -183,9 +184,7 @@ export class SharingService {
       ownerId: link.owner_id,
       linkToken: link.link_token,
       permission: link.permission,
-      expiresAt: link.expires_at
-        ? new Date(link.expires_at)
-        : undefined,
+      expiresAt: link.expires_at ? new Date(link.expires_at) : undefined,
       createdAt: new Date(link.created_at),
     };
   }
@@ -194,8 +193,6 @@ export class SharingService {
    * CRITICAL PERFORMANCE FIX: This method replaces the O(n*m*k) nested loop query
    * with a simple indexed SQL lookup - O(log n) performance!
    *
-   * Old (Firestore): Scan all users → all kits → all shares = O(n*m*k)
-   * New (PostgreSQL): Indexed lookup on subject_id (where subject_type='user') = O(log n)
    */
   async getSharedKits(userId: string): Promise<
     Array<
@@ -255,7 +252,7 @@ export class SharingService {
     return sharedKits.map((share: any) => ({
       id: share.id,
       kitId: share.kit_id,
-      ownerId: (share.kits?.tenants as any)?.owner_user_id || '',
+      ownerId: share.kits?.tenants?.owner_user_id || '',
       sharedWith: share.subject_id,
       permission: share.permission as 'view' | 'edit',
       sharedAt: new Date(share.created_at).toISOString(),
@@ -278,7 +275,11 @@ export class SharingService {
       .eq('id', trimmedKitId)
       .single();
 
-    if (!kitError && kit && (kit.tenants as any)?.owner_user_id === trimmedUserId) {
+    if (
+      !kitError &&
+      kit &&
+      (kit.tenants as any)?.owner_user_id === trimmedUserId
+    ) {
       return { isOwner: true };
     }
 
@@ -321,7 +322,10 @@ export class SharingService {
       .eq('id', kitId.trim())
       .single();
 
-    if (!kitData || (kitData.tenants as any)?.owner_user_id !== ownerId.trim()) {
+    if (
+      !kitData ||
+      (kitData.tenants as any)?.owner_user_id !== ownerId.trim()
+    ) {
       throw new NotFoundException('Kit not found or access denied');
     }
 
@@ -390,7 +394,10 @@ export class SharingService {
       .eq('id', kitId.trim())
       .single();
 
-    if (!kitData || (kitData.tenants as any)?.owner_user_id !== ownerId.trim()) {
+    if (
+      !kitData ||
+      (kitData.tenants as any)?.owner_user_id !== ownerId.trim()
+    ) {
       throw new NotFoundException('Kit not found or access denied');
     }
 

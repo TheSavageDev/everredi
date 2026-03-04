@@ -6,21 +6,9 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module';
-import {
-  FIREBASE_ADMIN,
-  FIRESTORE,
-  FIREBASE_AUTH,
-  FirebaseApp,
-} from '../../src/config/firebase.provider';
 import { UsersService } from '../../src/users/users.service';
 import { AdminGuard } from '../../src/common/guards/admin.guard';
-import { FirebaseAuthGuard } from '../../src/common/guards/firebase-auth.guard';
 import { PremiumGuard } from '../../src/common/guards/premium.guard';
-import { FirebaseService } from '../../src/config/firebase.service';
-import { APP_GUARD } from '@nestjs/core';
-import { Reflector } from '@nestjs/core';
-import { PREMIUM_KEY } from '../../src/common/decorators/premium.decorator';
-import { createFirebaseServiceMock } from './firebase-service.mock';
 import { TEST_USER_EMAIL, TEST_USER_ID } from './test-auth';
 import { StripeService } from '../../src/subscriptions/stripe.service';
 import { SubscriptionsService } from '../../src/subscriptions/subscriptions.service';
@@ -39,62 +27,13 @@ export async function createTestingApp(
   options?: TestAppOptions,
 ): Promise<TestAppContext> {
   const { isPremium = false, isAdmin = false } = options || {};
-  const firebaseAuthMock = {
-    verifyIdToken: jest.fn().mockImplementation(async (token: string) => {
-      // Verify that a token was provided
-      if (!token || token === '') {
-        throw new Error('Invalid token');
-      }
-      // Return the mocked user data - ensure all required fields are present
-      return {
-        uid: TEST_USER_ID,
-        email: TEST_USER_EMAIL,
-        name: 'Test User',
-        email_verified: true,
-        firebase: {
-          identities: {},
-          sign_in_provider: 'custom',
-        },
-      };
-    }),
-  };
-
-  const firestoreMock = {
-    collection: jest.fn().mockReturnThis(),
-    doc: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    get: jest.fn().mockResolvedValue({
-      size: 0,
-      docs: [],
-      exists: false,
-      data: () => ({}),
-      id: 'doc-id',
-    }),
-    set: jest.fn().mockResolvedValue(undefined),
-    update: jest.fn().mockResolvedValue(undefined),
-    add: jest.fn().mockImplementation((data: unknown) => {
-      const id = `doc-${Date.now()}-${Math.random()}`;
-      const docData =
-        typeof data === 'object' && data !== null ? { ...data, id } : { id };
-      return Promise.resolve({
-        id,
-        get: jest.fn().mockResolvedValue({
-          id,
-          data: () => docData,
-        }),
-      });
-    }),
-  };
 
   const usersServiceMock: Partial<UsersService> = {
     createOrUpdateUser: jest
       .fn()
       .mockImplementation(
-        (firebaseUid: string, email: string, displayName?: string) => ({
-          id: firebaseUid,
-          firebaseUid,
+        (id: string, email: string, displayName?: string) => ({
+          id,
           email,
           displayName,
           subscriptionTier: 'free',
@@ -106,7 +45,6 @@ export async function createTestingApp(
       ),
     getUserById: jest.fn().mockResolvedValue({
       id: TEST_USER_ID,
-      firebaseUid: TEST_USER_ID,
       email: TEST_USER_EMAIL,
       subscriptionTier: 'free',
       subscriptionStatus: 'active',
@@ -116,7 +54,6 @@ export async function createTestingApp(
     }),
     updateUser: jest.fn().mockResolvedValue({
       id: TEST_USER_ID,
-      firebaseUid: TEST_USER_ID,
       email: TEST_USER_EMAIL,
       subscriptionTier: 'free',
       subscriptionStatus: 'active',
@@ -144,44 +81,6 @@ export async function createTestingApp(
     }),
   };
 
-  const firebaseAppMock = {
-    getApp: jest.fn().mockReturnValue({}),
-    getAuth: jest.fn().mockReturnValue(firebaseAuthMock),
-    firestore: jest.fn().mockReturnValue(firestoreMock),
-    remoteConfig: jest.fn().mockReturnValue({}),
-  } as unknown as FirebaseApp;
-
-  // Override FirebaseAuthGuard to ensure it sets request.user correctly
-  // The real guard might not work correctly with our mocks, so we'll use a mock
-  const firebaseAuthGuardMock = {
-    canActivate: jest.fn().mockImplementation(async (context) => {
-      const request = context.switchToHttp().getRequest();
-      const authHeader =
-        request.headers?.authorization || request.headers?.Authorization;
-
-      if (
-        !authHeader ||
-        typeof authHeader !== 'string' ||
-        !authHeader.startsWith('Bearer ')
-      ) {
-        throw new UnauthorizedException('No token provided');
-      }
-
-      const token = authHeader.substring(7);
-      if (!token || token === '') {
-        throw new UnauthorizedException('Invalid token');
-      }
-
-      // Set user on request object - this is critical for PremiumGuard and AdminGuard
-      request.user = {
-        uid: TEST_USER_ID,
-        email: TEST_USER_EMAIL,
-        name: 'Test User',
-      };
-      return true;
-    }),
-  } as unknown as FirebaseAuthGuard;
-
   // Create a PremiumGuard mock that ensures user is set and checks premium status
   // For simplicity, we check premium status for all routes that reach here
   // The real guard checks @Premium() decorator first, but our mock simplifies this
@@ -205,7 +104,8 @@ export async function createTestingApp(
       }
 
       const user = request.user as { uid?: string } | undefined;
-      if (!user?.uid) {
+      const uid = user?.uid;
+      if (!uid) {
         throw new ForbiddenException({
           code: 'AUTH_REQUIRED',
           message: 'Authentication required.',
@@ -214,9 +114,7 @@ export async function createTestingApp(
 
       // Check premium status for all routes (simplified - real guard checks @Premium() first)
       // This ensures all premium routes are protected in tests
-      const subscription = await usersServiceMock.getSubscriptionStatus?.(
-        user.uid,
-      );
+      const subscription = await usersServiceMock.getSubscriptionStatus?.(uid);
       if (!subscription?.isPremium) {
         throw new ForbiddenException({
           code: 'PREMIUM_REQUIRED',
@@ -260,9 +158,17 @@ export async function createTestingApp(
         }
       }
 
+      const uid = user?.uid;
+      if (!uid) {
+        throw new ForbiddenException({
+          code: 'AUTH_REQUIRED',
+          message: 'Authentication required.',
+        });
+      }
+
       // Check admin status using the usersServiceMock (via closure)
       // This will use the mock that's injected into the module
-      const isAdmin = await usersServiceMock.isAdminUser?.(user.uid);
+      const isAdmin = await usersServiceMock.isAdminUser?.(uid);
 
       if (!isAdmin) {
         throw new ForbiddenException({
@@ -274,8 +180,6 @@ export async function createTestingApp(
       return true;
     }),
   } as unknown as AdminGuard;
-
-  const firebaseServiceMock = createFirebaseServiceMock();
 
   const stripeServiceMock: Partial<StripeService> = {
     createCheckoutSession: jest.fn().mockResolvedValue({
@@ -303,25 +207,11 @@ export async function createTestingApp(
   const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
   })
-    .overrideProvider(FirebaseApp)
-    .useValue(firebaseAppMock)
     .overrideGuard(AdminGuard)
     .useValue(adminGuardMock)
-    .overrideGuard(FirebaseAuthGuard)
-    .useValue(firebaseAuthGuardMock)
     // Override PremiumGuard with our mock that ensures user is set
-    // The real guard requires request.user to be set, which our FirebaseAuthGuard mock does
-    // But our mock also ensures it's set as a fallback
     .overrideGuard(PremiumGuard)
     .useValue(premiumGuardMock)
-    .overrideProvider(FirebaseService)
-    .useValue(firebaseServiceMock)
-    .overrideProvider(FIREBASE_ADMIN)
-    .useValue({})
-    .overrideProvider(FIRESTORE)
-    .useValue(firestoreMock)
-    .overrideProvider(FIREBASE_AUTH)
-    .useValue(firebaseAuthMock)
     .overrideProvider(UsersService)
     .useValue(usersServiceMock)
     .overrideProvider(StripeService)

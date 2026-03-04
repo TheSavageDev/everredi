@@ -1,17 +1,3 @@
-#!/usr/bin/env ts-node
-/**
- * Seed kit templates to staging environment
- *
- * Usage:
- *   npm run seed:staging
- *   npm run seed:staging -- --force  # Force update existing templates
- *
- * Environment Variables:
- *   FIREBASE_PROJECT_ID - Firebase project ID (default: everredi-dev)
- *   FIREBASE_DATABASE_ID - Firestore database ID (default: staging)
- *   GOOGLE_APPLICATION_CREDENTIALS - Path to service account key (optional, uses ADC if not set)
- */
-
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
@@ -22,20 +8,8 @@ const logger = new Logger('SeedStagingTemplates');
 async function bootstrap() {
   // CRITICAL: Set environment variables BEFORE NestJS initializes
   // ConfigService reads these during module initialization
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'everredi-dev';
-  const databaseId = process.env.FIREBASE_DATABASE_ID || 'staging';
-
-  // Ensure these are set in process.env so ConfigService can read them
-  if (!process.env.FIREBASE_PROJECT_ID) {
-    process.env.FIREBASE_PROJECT_ID = projectId;
-  }
-  if (!process.env.FIREBASE_DATABASE_ID) {
-    process.env.FIREBASE_DATABASE_ID = databaseId;
-  }
 
   logger.log('🌱 Seeding kit templates to staging environment');
-  logger.log(`   Project ID: ${process.env.FIREBASE_PROJECT_ID}`);
-  logger.log(`   Database ID: ${process.env.FIREBASE_DATABASE_ID}`);
 
   if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     logger.log('   Using Application Default Credentials (ADC)');

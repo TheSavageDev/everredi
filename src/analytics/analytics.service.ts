@@ -215,10 +215,10 @@ export class AnalyticsService {
   async getCostTracking(userId: string): Promise<CostTracking> {
     const { data: items, error } = await this.supabase
       .from('inventory_items')
-      .select('id, purchase_price, actual_quantity, supply_category_id, purchase_date')
-      .eq('user_id', userId)
-;
-
+      .select(
+        'id, purchase_price, actual_quantity, supply_category_id, purchase_date',
+      )
+      .eq('user_id', userId);
     if (error) {
       throw new Error(`Failed to get inventory items: ${error.message}`);
     }

@@ -73,7 +73,7 @@ export class SuppliesService {
 
     const categories = await this.supplyCategoriesService.getCategories();
     const sortOrderMap = new Map<string, number>();
-    
+
     for (const category of categories) {
       sortOrderMap.set(category.id, category.sortOrder);
     }
@@ -96,9 +96,10 @@ export class SuppliesService {
     }
 
     // Check if expiration date is in the future
-    const expirationDate = supply.sponsoredUntil instanceof Date 
-      ? supply.sponsoredUntil 
-      : new Date(supply.sponsoredUntil);
+    const expirationDate =
+      supply.sponsoredUntil instanceof Date
+        ? supply.sponsoredUntil
+        : new Date(supply.sponsoredUntil);
     const now = new Date();
 
     return expirationDate > now;
@@ -108,7 +109,10 @@ export class SuppliesService {
    * Filter supplies based on user's premium status and sponsorship expiration
    * Premium users see all supplies, free users see only non-sponsored or active sponsored supplies
    */
-  private filterSuppliesByAccess(supplies: Supply[], isPremium: boolean): Supply[] {
+  private filterSuppliesByAccess(
+    supplies: Supply[],
+    isPremium: boolean,
+  ): Supply[] {
     if (isPremium) {
       // Premium users see all supplies
       return supplies;
@@ -138,7 +142,7 @@ export class SuppliesService {
       // 1. Sort by category sort_order (ascending)
       const sortOrderA = categorySortOrders.get(a.categoryId) ?? 9999;
       const sortOrderB = categorySortOrders.get(b.categoryId) ?? 9999;
-      
+
       if (sortOrderA !== sortOrderB) {
         return sortOrderA - sortOrderB;
       }
@@ -164,7 +168,11 @@ export class SuppliesService {
     });
   }
 
-  async getSupplies(userId: string, isPremium: boolean, categoryId?: string): Promise<Supply[]> {
+  async getSupplies(
+    userId: string,
+    isPremium: boolean,
+    categoryId?: string,
+  ): Promise<Supply[]> {
     let query = this.supabase
       .from('supplies')
       .select('*')
@@ -189,7 +197,11 @@ export class SuppliesService {
     return this.sortSuppliesByCategory(filteredSupplies);
   }
 
-  async searchSupplies(term: string, userId: string, isPremium: boolean): Promise<Supply[]> {
+  async searchSupplies(
+    term: string,
+    userId: string,
+    isPremium: boolean,
+  ): Promise<Supply[]> {
     const { data, error } = await this.supabase
       .from('supplies')
       .select('*')
@@ -216,7 +228,11 @@ export class SuppliesService {
     return this.sortSuppliesByCategory(filteredByAccess);
   }
 
-  async getSupply(supplyId: string, userId: string, isPremium: boolean): Promise<Supply | null> {
+  async getSupply(
+    supplyId: string,
+    userId: string,
+    isPremium: boolean,
+  ): Promise<Supply | null> {
     const { data, error } = await this.supabase
       .from('supplies')
       .select('*')
@@ -231,7 +247,7 @@ export class SuppliesService {
 
     // Check if user has access to this supply
     const filtered = this.filterSuppliesByAccess([supply], isPremium);
-    
+
     return filtered.length > 0 ? filtered[0] : null;
   }
 

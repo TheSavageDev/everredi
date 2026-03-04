@@ -9,7 +9,7 @@ export function initializeSentry(configService: ConfigService): void {
     'development';
   const release = configService.get<string>('SENTRY_RELEASE');
   const tracesSampleRate = parseFloat(
-    configService.get<string>('SENTRY_TRACES_SAMPLE_RATE') || '1.0',
+    configService.get<string>('SENTRY_TRACES_SAMPLE_RATE') || '0.1',
   );
 
   // Only initialize if DSN is provided
@@ -27,7 +27,7 @@ export function initializeSentry(configService: ConfigService): void {
       environment,
       release,
       tracesSampleRate,
-      enableLogs: true,
+      enableLogs: environment === 'development',
       // HTTP instrumentation is enabled by default in Sentry v8 when tracesSampleRate is set
       // Note: consoleLoggingIntegration can be added if needed, but we're using NestJS Logger with Sentry.logger instead
       // HTTP instrumentation is enabled by default in Sentry v8 when tracesSampleRate is set

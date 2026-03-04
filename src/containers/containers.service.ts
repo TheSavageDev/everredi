@@ -74,7 +74,9 @@ export class ContainersService {
       query = query.eq('type', 'kit');
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', {
+      ascending: false,
+    });
 
     if (error) {
       this.logger.error(`Failed to get containers: ${error.message}`);
@@ -114,8 +116,12 @@ export class ContainersService {
       .single();
 
     if (createError || !newContainer) {
-      this.logger.error(`Failed to create backstock kit: ${createError?.message}`);
-      throw new Error(`Failed to create backstock kit: ${createError?.message}`);
+      this.logger.error(
+        `Failed to create backstock kit: ${createError?.message}`,
+      );
+      throw new Error(
+        `Failed to create backstock kit: ${createError?.message}`,
+      );
     }
 
     // Create kits record
@@ -178,7 +184,8 @@ export class ContainersService {
   ): Promise<Container> {
     const updateData: any = {};
     if (updates.name !== undefined) updateData.name = updates.name;
-    if (updates.locationId !== undefined) updateData.location_id = updates.locationId;
+    if (updates.locationId !== undefined)
+      updateData.location_id = updates.locationId;
     if (updates.metadata !== undefined) updateData.metadata = updates.metadata;
 
     const { data, error } = await this.supabase

@@ -14,7 +14,7 @@ describe('ExpirationService', () => {
   it('returns empty list when there are no expiring items', async () => {
     // Mock empty inventory items
     (supabaseMock._setMockData as jest.Mock)('inventory_items', []);
-    
+
     const items = await service.getExpiringItemsByThreshold('user-1', [30]);
     expect(Array.isArray(items)).toBe(true);
     expect(items.length).toBe(0);

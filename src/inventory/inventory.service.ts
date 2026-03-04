@@ -159,7 +159,7 @@ export class InventoryService {
       throw new Error(`Failed to get inventory items: ${error.message}`);
     }
 
-    const chunk = (rows || []) as any[];
+    const chunk = rows || [];
     const kitIds = [
       ...new Set(chunk.map((r: any) => r.kit_id).filter(Boolean)),
     ] as string[];
@@ -223,7 +223,7 @@ export class InventoryService {
     // Check for expired items and update their status
     const now = new Date();
     const lifecycleStates = ['used', 'disposed', 'expired'];
-    const expiredWithTenant = (rows as any[]).filter(
+    const expiredWithTenant = rows.filter(
       (r) =>
         r.expiration_date &&
         new Date(r.expiration_date) < now &&
@@ -277,12 +277,10 @@ export class InventoryService {
 
     // Fetch kit names for all distinct kit_ids (kits can be in any of the user's tenants)
     const kitIds = [
-      ...new Set(
-        (finalRows as any[]).map((r: any) => r.kit_id).filter(Boolean),
-      ),
+      ...new Set(finalRows.map((r: any) => r.kit_id).filter(Boolean)),
     ] as string[];
     const tenantIdsInRows = [
-      ...new Set((finalRows as any[]).map((r: any) => r.tenant_id)),
+      ...new Set(finalRows.map((r: any) => r.tenant_id)),
     ] as string[];
     let kitNameMap = new Map<string, string>();
     if (kitIds.length > 0) {
@@ -405,7 +403,8 @@ export class InventoryService {
 
     if (!isPremium) {
       // Get user's tenant for scoping (count against caller's limit, not override)
-      const tenantForCount = await this.tenantsService.getUserDefaultTenant(userId);
+      const tenantForCount =
+        await this.tenantsService.getUserDefaultTenant(userId);
 
       const { count, error: countError } = await this.supabase
         .from('inventory_items')

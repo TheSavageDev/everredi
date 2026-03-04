@@ -20,7 +20,6 @@ Use Cloud Build substitution variables to pass environment-specific values durin
 substitutions:
   _ENVIRONMENT: 'dev'
   _CORS_ORIGIN: 'https://dev.everredi.com'
-  _FIREBASE_DATABASE_ID: '(default)'
 
 steps:
   # ... build steps ...
@@ -33,7 +32,7 @@ steps:
       - 'deploy'
       - 'everredi-api-${_ENVIRONMENT}'
       - '--set-env-vars'
-      - 'NODE_ENV=production,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_ID=${_FIREBASE_DATABASE_ID},CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
+      - 'NODE_ENV=production,CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
 ```
 
 ### Pros
@@ -66,9 +65,6 @@ backend/
 
 ```yaml
 environment: dev
-firebase:
-  projectId: everredi-dev
-  databaseId: '(default)'
 cors:
   origin: 'https://dev.everredi.com'
 api:
@@ -88,7 +84,6 @@ steps:
       - |
         # Parse YAML and set env vars (requires yq or similar)
         CORS_ORIGIN=$(yq eval '.cors.origin' config/env.dev.yaml)
-        DB_ID=$(yq eval '.firebase.databaseId' config/env.dev.yaml)
         # Export for next steps
         echo "CORS_ORIGIN=${CORS_ORIGIN}" >> /workspace/env_vars.txt
         echo "DB_ID=${DB_ID}" >> /workspace/env_vars.txt
@@ -101,7 +96,7 @@ steps:
       - |
         source /workspace/env_vars.txt
         gcloud run deploy everredi-api-dev \
-          --set-env-vars "CORS_ORIGIN=${CORS_ORIGIN},FIREBASE_DATABASE_ID=${DB_ID}"
+          --set-env-vars "CORS_ORIGIN=${CORS_ORIGIN}"
 ```
 
 ### Pros
@@ -123,10 +118,6 @@ Store environment-specific secrets in Secret Manager with naming conventions.
 ### Naming Convention
 
 ```
-firebase-private-key-dev
-firebase-private-key-staging
-firebase-private-key-prod
-
 stripe-secret-key-dev
 stripe-secret-key-staging
 stripe-secret-key-prod
@@ -148,7 +139,7 @@ steps:
       - 'deploy'
       - 'everredi-api-${_ENV}'
       - '--set-secrets'
-      - 'FIREBASE_PRIVATE_KEY=firebase-private-key-${_ENV}:latest,FIREBASE_CLIENT_EMAIL=firebase-client-email-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest'
+      - STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest'
 ```
 
 ### Pros
@@ -177,14 +168,10 @@ Combine multiple approaches:
 ```yaml
 # config/env.template.yaml
 environment: ${ENV}
-firebase:
-  projectId: ${PROJECT_ID}
-  databaseId: ${DATABASE_ID}
 cors:
   origin: ${CORS_ORIGIN}
 secrets:
   # These are loaded from Secret Manager
-  firebasePrivateKey: firebase-private-key-${ENV}
   stripeSecretKey: stripe-secret-key-${ENV}
 ```
 
@@ -207,9 +194,9 @@ steps:
       - 'deploy'
       - 'everredi-api-${_ENV}'
       - '--set-env-vars'
-      - 'NODE_ENV=production,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_ID=${_DATABASE_ID},CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
+      - 'NODE_ENV=production,CORS_ORIGIN=${_CORS_ORIGIN},PORT=8080'
       - '--set-secrets'
-      - 'FIREBASE_PRIVATE_KEY=firebase-private-key-${_ENV}:latest,FIREBASE_CLIENT_EMAIL=firebase-client-email-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest'
+      - 'STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest'
 ```
 
 #### 3. Set substitution variables per trigger:
@@ -260,9 +247,6 @@ spec:
           env:
             - name: NODE_ENV
               value: 'production'
-            - name: FIREBASE_PROJECT_ID
-              value: 'everredi-dev'
-            - name: FIREBASE_DATABASE_ID
               value: '(default)'
             - name: CORS_ORIGIN
               value: 'https://dev.everredi.com'
@@ -329,23 +313,6 @@ gcloud builds triggers update staging-deploy \
 # Set substitution variables for prod trigger
 gcloud builds triggers update production-deploy \
   --substitutions=_ENV=prod,_CORS_ORIGIN=https://everredi.com,_DATABASE_ID=prod
-```
-
-## Managing Secrets Per Environment
-
-```bash
-# Create environment-specific secrets
-gcloud secrets create firebase-private-key-dev --data-file=dev-key.json
-gcloud secrets create firebase-private-key-staging --data-file=staging-key.json
-gcloud secrets create firebase-private-key-prod --data-file=prod-key.json
-
-# Grant access (repeat for each secret)
-PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-
-gcloud secrets add-iam-policy-binding firebase-private-key-dev \
-  --member="serviceAccount:${SERVICE_ACCOUNT}" \
-  --role="roles/secretmanager.secretAccessor"
 ```
 
 ## Best Practices

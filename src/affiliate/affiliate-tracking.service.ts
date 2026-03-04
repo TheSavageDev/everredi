@@ -77,12 +77,14 @@ export class AffiliateTrackingService {
   async getClicksByUser(
     userId: string,
     limit: number = 100,
-  ): Promise<Array<{
-    supplyId: string;
-    supplyName: string;
-    clickCount: number;
-    conversionCount: number;
-  }>> {
+  ): Promise<
+    Array<{
+      supplyId: string;
+      supplyName: string;
+      clickCount: number;
+      conversionCount: number;
+    }>
+  > {
     const { data, error } = await this.supabase
       .from('affiliate_tracking')
       .select('supply_id, click_count, conversion_count, supplies(name)')

@@ -14,8 +14,13 @@ async function bootstrap() {
     logger.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     logger.log(`PORT: ${process.env.PORT || '8080'}`);
 
+    const nodeEnv = process.env.NODE_ENV || 'development';
+    const isProduction = nodeEnv === 'production';
+
     const app = await NestFactory.create(AppModule, {
-      logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+      logger: isProduction
+        ? ['error', 'warn', 'log']
+        : ['error', 'warn', 'log', 'debug', 'verbose'],
     });
 
     // Initialize Sentry before other services
@@ -48,6 +53,11 @@ async function bootstrap() {
 
       if (validation.isValid) {
         logger.log('✅ Environment configuration validated');
+      } else if (isProduction) {
+        logger.error(
+          '❌ Environment validation failed in production. Shutting down application.',
+        );
+        throw new Error('Missing required environment variables');
       }
     } catch (error) {
       logger.warn('⚠️  Environment validation failed:', error);
@@ -105,7 +115,6 @@ async function bootstrap() {
 
     // In staging/production, also allow the Cloud Run service URL
     // This allows both the vanity URL and the default Cloud Run URL to work
-    const isProduction = configService.get<string>('NODE_ENV') === 'production';
     if (isProduction) {
       // Get the Cloud Run service name from environment
       // K_SERVICE is set by Cloud Run (e.g., "everredi-api-staging")

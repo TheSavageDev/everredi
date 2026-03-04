@@ -150,7 +150,11 @@ describe('BrandPartnershipsService', () => {
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockDocument as jest.Mock)('brand_partnerships', '1', partnership);
+      (supabaseMock._setMockDocument as jest.Mock)(
+        'brand_partnerships',
+        '1',
+        partnership,
+      );
 
       const result = await service.getPartnership('1');
 
@@ -197,7 +201,11 @@ describe('BrandPartnershipsService', () => {
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockDocument as jest.Mock)('brand_partnerships', '1', existingPartnership);
+      (supabaseMock._setMockDocument as jest.Mock)(
+        'brand_partnerships',
+        '1',
+        existingPartnership,
+      );
 
       const updates = {
         brandName: 'Updated Brand',
@@ -228,7 +236,11 @@ describe('BrandPartnershipsService', () => {
         updated_at: new Date().toISOString(),
       };
 
-      (supabaseMock._setMockDocument as jest.Mock)('brand_partnerships', '1', partnership);
+      (supabaseMock._setMockDocument as jest.Mock)(
+        'brand_partnerships',
+        '1',
+        partnership,
+      );
 
       await service.deletePartnership('1');
 

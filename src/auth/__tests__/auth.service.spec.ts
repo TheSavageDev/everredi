@@ -1,6 +1,5 @@
 import { AuthService } from '../auth.service';
 import { UsersService } from '../../users/users.service';
-import { Timestamp } from 'firebase-admin/firestore';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -20,8 +19,8 @@ describe('AuthService', () => {
       email: 'test@example.com',
       subscriptionTier: 'free',
       subscriptionStatus: 'active',
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       isActive: true,
     };
     usersService.createOrUpdateUser = jest

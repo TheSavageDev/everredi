@@ -26,10 +26,15 @@ export class SuppliesController {
     @CurrentUser('uid') userId: string,
     @Query('categoryId') categoryId?: string,
   ) {
-    const subscriptionStatus = await this.usersService.getSubscriptionStatus(userId);
+    const subscriptionStatus =
+      await this.usersService.getSubscriptionStatus(userId);
     const isPremium = subscriptionStatus.isPremium;
 
-    const supplies = await this.suppliesService.getSupplies(userId, isPremium, categoryId);
+    const supplies = await this.suppliesService.getSupplies(
+      userId,
+      isPremium,
+      categoryId,
+    );
     return {
       success: true,
       data: supplies,
@@ -54,10 +59,15 @@ export class SuppliesController {
       };
     }
 
-    const subscriptionStatus = await this.usersService.getSubscriptionStatus(userId);
+    const subscriptionStatus =
+      await this.usersService.getSubscriptionStatus(userId);
     const isPremium = subscriptionStatus.isPremium;
 
-    const supplies = await this.suppliesService.searchSupplies(term, userId, isPremium);
+    const supplies = await this.suppliesService.searchSupplies(
+      term,
+      userId,
+      isPremium,
+    );
     return {
       success: true,
       data: supplies,
@@ -67,11 +77,9 @@ export class SuppliesController {
   }
 
   @Get(':id')
-  async getSupply(
-    @Param('id') id: string,
-    @CurrentUser('uid') userId: string,
-  ) {
-    const subscriptionStatus = await this.usersService.getSubscriptionStatus(userId);
+  async getSupply(@Param('id') id: string, @CurrentUser('uid') userId: string) {
+    const subscriptionStatus =
+      await this.usersService.getSubscriptionStatus(userId);
     const isPremium = subscriptionStatus.isPremium;
 
     const supply = await this.suppliesService.getSupply(id, userId, isPremium);

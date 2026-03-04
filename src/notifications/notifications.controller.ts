@@ -73,28 +73,4 @@ export class NotificationsController {
       timestamp: new Date().toISOString(),
     };
   }
-
-  // Preferences endpoint moved to AdvancedNotificationsController (premium feature)
-  // This route is removed to avoid conflict with the premium version
-
-  @Put('preferences')
-  updatePreferences(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    @CurrentUser() _user: { uid: string },
-    @Body()
-    _preferences: {
-      expirationAlerts?: boolean;
-      expirationAlertDays?: number[];
-      oshaComplianceAlerts?: boolean;
-      kitReminders?: boolean;
-    },
-  ) {
-    // TODO: Store preferences in Firestore
-    // For now, just return success
-    return {
-      success: true,
-      message: 'Notification preferences updated successfully',
-      timestamp: new Date().toISOString(),
-    };
-  }
 }

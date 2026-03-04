@@ -408,7 +408,7 @@ export class PublicTemplatesService {
     // Get all supply IDs to fetch supply names (templates are catalog-based)
     const supplyIds = items
       .map((item: any) => item.supply_id ?? item.supplyId)
-      .filter((id: string | null | undefined) => id != null) as string[];
+      .filter((id: string | null | undefined) => id != null);
 
     // Fetch supply names in batch
     const supplyNamesMap = new Map<string, string>();

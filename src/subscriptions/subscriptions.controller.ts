@@ -1,19 +1,24 @@
 import {
+  BadRequestException,
   Controller,
-  Post,
   Get,
   Body,
   Headers,
-  Req,
-  UseGuards,
   Logger,
+  Post,
+  Req,
+  UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { SubscriptionsService } from './subscriptions.service';
+import {
+  SubscriptionsService,
+  type RevenueCatWebhookPayload,
+} from './subscriptions.service';
 import { StripeService } from './stripe.service';
 import { RevenueCatService } from './revenuecat.service';
 
@@ -67,8 +72,8 @@ export class SubscriptionsController {
     @Headers('stripe-signature') signature: string,
   ) {
     try {
-      const event = await this.stripeService.handleWebhook(
-        req.rawBody?.toString() || '',
+      const event = this.stripeService.handleWebhook(
+        req.rawBody?.toString() ?? '',
         signature,
       );
       await this.subscriptionsService.handleWebhookEvent(event);
@@ -76,11 +81,22 @@ export class SubscriptionsController {
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        'Webhook error:',
-        error instanceof Error ? error.stack : String(error),
-      );
-      return { received: false, error: errorMessage };
+      const errorStack =
+        error instanceof Error ? error.stack : String(errorMessage);
+
+      this.logger.error('Stripe webhook error:', errorStack);
+
+      const lower = errorMessage.toLowerCase();
+      const isSignatureError =
+        lower.includes('signature verification') ||
+        lower.includes('no signatures found') ||
+        lower.includes('invalid signature');
+
+      if (isSignatureError) {
+        throw new UnauthorizedException('Invalid Stripe signature');
+      }
+
+      throw new BadRequestException('Failed to process Stripe webhook');
     }
   }
 
@@ -159,19 +175,30 @@ export class SubscriptionsController {
   @Post('revenuecat/webhook')
   @SkipThrottle()
   async handleRevenueCatWebhook(
-    @Body() body: any,
+    @Body() body: RevenueCatWebhookPayload,
     @Headers('authorization') authHeader?: string,
   ) {
     try {
       // Verify webhook authorization (RevenueCat sends Authorization header with shared secret)
       const webhookSecret = process.env.REVENUECAT_WEBHOOK_SECRET;
-      if (webhookSecret) {
+      const nodeEnv = process.env.NODE_ENV || 'development';
+
+      if (!webhookSecret) {
+        const message =
+          '[RevenueCat Webhook] REVENUECAT_WEBHOOK_SECRET is not configured.';
+        if (nodeEnv === 'production') {
+          this.logger.error(message);
+          throw new UnauthorizedException('RevenueCat webhook misconfigured');
+        }
+
+        this.logger.warn(
+          `${message} Skipping authorization check in non-production environment.`,
+        );
+      } else {
         const providedSecret = authHeader?.replace('Bearer ', '');
         if (providedSecret !== webhookSecret) {
-          this.logger.warn(
-            '[RevenueCat Webhook] Invalid authorization secret',
-          );
-          return { received: false, error: 'Unauthorized' };
+          this.logger.warn('[RevenueCat Webhook] Invalid authorization secret');
+          throw new UnauthorizedException('Invalid RevenueCat webhook secret');
         }
       }
 
@@ -188,7 +215,8 @@ export class SubscriptionsController {
         '[RevenueCat Webhook] Error:',
         error instanceof Error ? error.stack : String(error),
       );
-      return { received: false, error: errorMessage };
+
+      throw new BadRequestException('Failed to process RevenueCat webhook');
     }
   }
 

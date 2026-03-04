@@ -22,7 +22,6 @@ coverage
 !.env.example
 *.local
 
-# Firebase service account keys (sensitive)
 *.json
 !package.json
 !package-lock.json

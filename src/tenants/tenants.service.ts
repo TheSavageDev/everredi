@@ -59,8 +59,15 @@ export class TenantsService {
       .single();
 
     // If table doesn't exist, return a mock tenant (old schema compatibility)
-    if (findError && (findError.message?.includes('schema cache') || findError.code === 'PGRST202' || findError.code === '42P01')) {
-      this.logger.warn('tenants table not found - migrations 012-022 not run. Returning mock tenant for backward compatibility.');
+    if (
+      findError &&
+      (findError.message?.includes('schema cache') ||
+        findError.code === 'PGRST202' ||
+        findError.code === '42P01')
+    ) {
+      this.logger.warn(
+        'tenants table not found - migrations 012-022 not run. Returning mock tenant for backward compatibility.',
+      );
       // Return a mock tenant that represents the user's personal workspace
       // In the old schema, each user is implicitly their own tenant
       return {
@@ -84,11 +91,11 @@ export class TenantsService {
       .eq('id', userId)
       .single();
 
-    const tenantName = user?.display_name 
+    const tenantName = user?.display_name
       ? `${user.display_name}'s Workspace`
-      : user?.email 
-      ? `${user.email}'s Workspace`
-      : 'Personal Workspace';
+      : user?.email
+        ? `${user.email}'s Workspace`
+        : 'Personal Workspace';
 
     // Create personal tenant
     const { data: newTenant, error: createError } = await this.supabase
@@ -102,10 +109,18 @@ export class TenantsService {
       .single();
 
     if (createError || !newTenant) {
-      this.logger.error(`Failed to create personal tenant: ${createError?.message}`);
+      this.logger.error(
+        `Failed to create personal tenant: ${createError?.message}`,
+      );
       // If table doesn't exist, return mock tenant instead of throwing
-      if (createError?.message?.includes('schema cache') || createError?.code === 'PGRST202' || createError?.code === '42P01') {
-        this.logger.warn('tenants table not found - migrations 012-022 not run. Returning mock tenant for backward compatibility.');
+      if (
+        createError?.message?.includes('schema cache') ||
+        createError?.code === 'PGRST202' ||
+        createError?.code === '42P01'
+      ) {
+        this.logger.warn(
+          'tenants table not found - migrations 012-022 not run. Returning mock tenant for backward compatibility.',
+        );
         return {
           id: userId,
           type: 'personal',
@@ -115,7 +130,9 @@ export class TenantsService {
           updatedAt: new Date(),
         };
       }
-      throw new Error(`Failed to create personal tenant: ${createError?.message}`);
+      throw new Error(
+        `Failed to create personal tenant: ${createError?.message}`,
+      );
     }
 
     // Create tenant member (owner)
@@ -227,7 +244,8 @@ export class TenantsService {
     }
 
     const roleHierarchy = { owner: 3, admin: 2, member: 1 };
-    const userRoleLevel = roleHierarchy[member.role as keyof typeof roleHierarchy] || 0;
+    const userRoleLevel =
+      roleHierarchy[member.role as keyof typeof roleHierarchy] || 0;
     const requiredRoleLevel = roleHierarchy[requiredRole] || 0;
 
     return userRoleLevel >= requiredRoleLevel;

@@ -9,22 +9,21 @@ This api uses **Jest + Supertest** for automated testing. The test suite is spli
   - **Location**: `src/**/__tests__/*.spec.ts` (for example `src/users/__tests__/users.service.spec.ts`).
   - **Examples**:
     - `AuthService` delegating to `UsersService`.
-    - `UsersService` behavior with Firestore mocked.
+    - `UsersService` behavior with Supabase mocked.
     - `StripeService` wrapping Stripe SDK.
 
 - **Integration tests**
   - **Scope**: Multiple Nest providers working together via Nest DI, without going through HTTP.
   - **Location**: Also under `src/**/__tests__/*.spec.ts`, but named accordingly (for example `ai.service.integration.spec.ts`).
   - **Examples**:
-    - `AiService` + `UsersService` + a Firestore mock.
+    - `AiService` + `UsersService` + a Supabase mock.
 
 - **E2E tests**
   - **Scope**: Full HTTP stack (`Supertest` → controller → service → repository / external integrations (mocked)).
   - **Location**: `test/e2e/**/*.e2e-spec.ts`.
   - **Bootstrap**: All e2e tests create an in-memory `AppModule` via `test/utils/create-testing-app.ts`, which:
     - Applies the same global validation pipe and `api` prefix as `main.ts`.
-    - Overrides Firebase, Firestore, and auth providers with in-memory mocks.
-    - Overrides `UsersService` to avoid depending on real Firestore data.
+    - Overrides `UsersService` to avoid depending on real Supabase data.
 
 - **Regression tests**
   - **Scope**: Any test that explicitly guards against a previously observed bug (at either service or HTTP level).
@@ -86,7 +85,6 @@ This api uses **Jest + Supertest** for automated testing. The test suite is spli
   - `test/jest.setup.ts` runs for both unit/integration and e2e:
     - Sets `NODE_ENV=test` and safe default env vars (`CORS_ORIGIN`, `FRONTEND_URL`, etc.).
     - Mocks external SDKs:
-      - `firebase-admin` (auth + firestore).
       - `@google/generative-ai`.
       - `stripe`.
       - `@google-cloud/tasks`.
@@ -95,7 +93,6 @@ This api uses **Jest + Supertest** for automated testing. The test suite is spli
   - `test/utils/create-testing-app.ts`:
     - Imports `AppModule`.
     - Overrides:
-      - `FIREBASE_ADMIN`, `FIRESTORE`, `FIREBASE_AUTH` with in-memory mocks.
       - `UsersService` with an in-memory implementation.
     - Applies global validation pipe and `api` prefix.
     - Returns `{ app, close }` to manage lifecycle in tests.

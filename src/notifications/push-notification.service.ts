@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE } from '../config/supabase.provider';
 import { DeviceTokensService } from './device-tokens.service';
 import { AdvancedNotificationsService } from './advanced-notifications.service';
-import * as admin from 'firebase-admin';
 
 const logger = new Logger('PushNotificationService');
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -110,7 +109,8 @@ export class PushNotificationService {
   }
 
   /**
-   * Send title/body/data to all of a user's devices (Expo + FCM). Returns number of messages sent.
+   * Send title/body/data to all of a user's devices.
+   * Currently only Expo push tokens are supported; non-Expo tokens are skipped.
    */
   private async sendToUserDevices(
     userId: string,
@@ -124,7 +124,7 @@ export class PushNotificationService {
     }
 
     const expoDevices = deviceTokens.filter((d) => isExpoToken(d.token));
-    const fcmDevices = deviceTokens.filter((d) => !isExpoToken(d.token));
+    const nonExpoDevices = deviceTokens.filter((d) => !isExpoToken(d.token));
 
     if (expoDevices.length > 0) {
       await this.sendExpoPush(
@@ -134,46 +134,10 @@ export class PushNotificationService {
       );
     }
 
-    if (fcmDevices.length > 0) {
-      const messages: admin.messaging.Message[] = fcmDevices.map((device) => ({
-        token: device.token,
-        notification: { title: payload.title, body: payload.body },
-        data: payload.data,
-        apns: {
-          payload: {
-            aps: {
-              sound: 'default',
-              badge: 1,
-            },
-          },
-        },
-        android: {
-          priority: 'high',
-          notification: { sound: 'default' },
-        },
-      }));
-
-      const batchSize = 500;
-      for (let i = 0; i < messages.length; i += batchSize) {
-        const batch = messages.slice(i, i + batchSize);
-        const response = await admin.messaging().sendEach(batch);
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success && resp.error) {
-            logger.error(
-              `Failed to send FCM to device ${i + idx}:`,
-              resp.error,
-            );
-            if (
-              resp.error?.code === 'messaging/invalid-registration-token' ||
-              resp.error?.code === 'messaging/registration-token-not-registered'
-            ) {
-              this.removeInvalidToken(userId, fcmDevices[i + idx].token).catch(
-                (err) => logger.error(`Error removing invalid token:`, err),
-              );
-            }
-          }
-        });
-      }
+    if (nonExpoDevices.length > 0) {
+      logger.warn(
+        `Skipping ${nonExpoDevices.length} non-Expo push tokens for user ${userId} (FCM is no longer used).`,
+      );
     }
 
     return deviceTokens.length;

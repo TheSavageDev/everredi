@@ -66,7 +66,7 @@ export class SupabaseService {
     const chunkSize = 1000;
     for (let i = 0; i < records.length; i += chunkSize) {
       const chunk = records.slice(i, i + chunkSize);
-      let query = this.supabase.from(table).insert(chunk);
+      const query = this.supabase.from(table).insert(chunk);
 
       if (options?.onConflict) {
         // Note: Supabase upsert uses .upsert() method instead of onConflict

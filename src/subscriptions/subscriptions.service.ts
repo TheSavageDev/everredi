@@ -1,9 +1,37 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type Stripe from 'stripe';
 import { StripeService } from './stripe.service';
 import { UsersService } from '../users/users.service';
-import { RevenueCatService } from './revenuecat.service';
+import {
+  RevenueCatService,
+  type RevenueCatCustomerInfo,
+} from './revenuecat.service';
 import { SUPABASE } from '../config/supabase.provider';
+
+export interface SubscriptionUpdate {
+  subscriptionTier: 'free' | 'premium';
+  subscriptionStatus: 'active' | 'cancelled' | 'expired';
+  subscriptionExpiresAt?: Date;
+}
+
+export interface RevenueCatWebhookPayload {
+  event: {
+    id: string;
+    app_user_id: string;
+    product_id: string;
+    period_type: string;
+    purchased_at_ms: number;
+    expiration_at_ms: number | null;
+    environment: string;
+    entitlement_ids: string[];
+    presented_offering_id?: string;
+    transaction_id: string;
+    original_transaction_id: string;
+    is_family_share: boolean;
+    store: string;
+  };
+}
 
 @Injectable()
 export class SubscriptionsService {
@@ -71,7 +99,7 @@ export class SubscriptionsService {
     return { url: session.url };
   }
 
-  async handleWebhookEvent(event: any) {
+  async handleWebhookEvent(event: Stripe.Event): Promise<void> {
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutCompleted(event.data.object);
@@ -85,32 +113,43 @@ export class SubscriptionsService {
     }
   }
 
-  private async handleCheckoutCompleted(session: any) {
+  private async handleCheckoutCompleted(
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
     const userId = session.metadata?.userId;
     if (!userId) return;
 
     await this.updateUserSubscription(userId, {
       subscriptionTier: 'premium',
       subscriptionStatus: 'active',
-      subscriptionExpiresAt: new Date(
-        session.subscription?.current_period_end * 1000,
-      ),
+      // Expiration will be managed by subsequent subscription.updated events
+      subscriptionExpiresAt: undefined,
     });
   }
 
-  private async handleSubscriptionUpdated(subscription: any) {
+  private async handleSubscriptionUpdated(
+    subscription: Stripe.Subscription,
+  ): Promise<void> {
     const userId = subscription.metadata?.userId;
     if (!userId) return;
+
+    const currentPeriodEnd = (
+      subscription as Stripe.Subscription & { current_period_end?: number }
+    ).current_period_end;
 
     await this.updateUserSubscription(userId, {
       subscriptionTier: subscription.status === 'active' ? 'premium' : 'free',
       subscriptionStatus:
         subscription.status === 'active' ? 'active' : 'cancelled',
-      subscriptionExpiresAt: new Date(subscription.current_period_end * 1000),
+      subscriptionExpiresAt: currentPeriodEnd
+        ? new Date(currentPeriodEnd * 1000)
+        : undefined,
     });
   }
 
-  private async handleSubscriptionDeleted(subscription: any) {
+  private async handleSubscriptionDeleted(
+    subscription: Stripe.Subscription,
+  ): Promise<void> {
     const userId = subscription.metadata?.userId;
     if (!userId) return;
 
@@ -121,7 +160,10 @@ export class SubscriptionsService {
     });
   }
 
-  private async updateUserSubscription(userId: string, updates: any) {
+  private async updateUserSubscription(
+    userId: string,
+    updates: SubscriptionUpdate,
+  ): Promise<void> {
     // Use UsersService which is already migrated to Supabase
     await this.usersService.updateUser(userId, {
       subscriptionTier: updates.subscriptionTier,
@@ -134,23 +176,9 @@ export class SubscriptionsService {
    * Handle RevenueCat webhook events
    * RevenueCat sends webhooks when purchases, renewals, cancellations happen
    */
-  async handleRevenueCatWebhook(event: {
-    event: {
-      id: string;
-      app_user_id: string;
-      product_id: string;
-      period_type: string;
-      purchased_at_ms: number;
-      expiration_at_ms: number | null;
-      environment: string;
-      entitlement_ids: string[];
-      presented_offering_id?: string;
-      transaction_id: string;
-      original_transaction_id: string;
-      is_family_share: boolean;
-      store: string;
-    };
-  }): Promise<void> {
+  async handleRevenueCatWebhook(
+    event: RevenueCatWebhookPayload,
+  ): Promise<void> {
     try {
       const { app_user_id, entitlement_ids, expiration_at_ms } = event.event;
 
@@ -200,7 +228,7 @@ export class SubscriptionsService {
    */
   async syncRevenueCatCustomerToDatabase(
     userId: string,
-    customerInfo: any,
+    customerInfo: RevenueCatCustomerInfo,
   ): Promise<void> {
     try {
       const entitlements = customerInfo.subscriber.entitlements || {};

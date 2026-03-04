@@ -24,8 +24,6 @@ config({ path: resolve(__dirname, '../.env') });
 config({ path: resolve(__dirname, '../.env.local') });
 
 const API_URL = process.env.API_URL || 'http://localhost:5051/api';
-const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL || 'test@example.com';
-const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD || 'testpassword123';
 
 // Debug: Show what we found
 if (process.env.DEBUG === 'true') {
@@ -33,9 +31,6 @@ if (process.env.DEBUG === 'true') {
   console.log(`  API_URL: ${API_URL}`);
   console.log(
     `  TEST_AUTH_TOKEN: ${process.env.TEST_AUTH_TOKEN ? 'SET (' + process.env.TEST_AUTH_TOKEN.substring(0, 20) + '...)' : 'NOT SET'}`,
-  );
-  console.log(
-    `  FIREBASE_AUTH_TOKEN: ${process.env.FIREBASE_AUTH_TOKEN ? 'SET' : 'NOT SET'}`,
   );
 }
 
@@ -69,15 +64,13 @@ async function fetchWithAuth(
   options: RequestInit = {},
   token?: string,
 ): Promise<Response> {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
+  const headers = new Headers(options.headers ?? {});
+  headers.set('Content-Type', 'application/json');
 
   if (token) {
     // Remove any existing "Bearer " prefix if present
     const cleanToken = token.startsWith('Bearer ') ? token.substring(7) : token;
-    headers['Authorization'] = `Bearer ${cleanToken}`;
+    headers.set('Authorization', `Bearer ${cleanToken}`);
   }
 
   const response = await fetch(`${API_URL}${url}`, {
@@ -102,7 +95,6 @@ async function main() {
   console.log(`API URL: ${API_URL}\n`);
 
   let authToken: string | undefined;
-  let userId: string | undefined;
   let locationId: string | undefined;
   let inventoryItemId: string | undefined;
   let kitId: string | undefined;
@@ -128,7 +120,6 @@ async function main() {
     // Try multiple ways to get the token
     const testToken =
       process.env.TEST_AUTH_TOKEN ||
-      process.env.FIREBASE_AUTH_TOKEN ||
       process.argv.find((arg) => arg.startsWith('--token='))?.split('=')[1];
 
     if (!testToken) {
@@ -143,22 +134,7 @@ async function main() {
       );
       console.error('\n   To get a token:');
       console.error('   - Sign in to the web app and check browser console');
-      console.error('   - Or use Firebase Admin SDK to generate a token');
       throw new Error('TEST_AUTH_TOKEN not set. See instructions above.');
-    }
-
-    // Validate token format (Firebase ID tokens are JWT format)
-    if (!testToken.includes('.')) {
-      throw new Error(
-        'Token format appears invalid. Firebase ID tokens should be JWT format (contain dots).',
-      );
-    }
-
-    const tokenParts = testToken.split('.');
-    if (tokenParts.length !== 3) {
-      throw new Error(
-        'Token format appears invalid. Firebase ID tokens should have 3 parts separated by dots.',
-      );
     }
 
     console.log(
@@ -190,7 +166,6 @@ async function main() {
     if (!data.success || !data.data) {
       throw new Error('Auth response invalid');
     }
-    userId = data.data.id || data.data.firebaseUid;
   });
 
   // ============================================

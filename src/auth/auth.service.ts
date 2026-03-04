@@ -10,10 +10,6 @@ export class AuthService {
     email: string,
     displayName?: string,
   ) {
-    return this.usersService.createOrUpdateUser(
-      userId,
-      email,
-      displayName,
-    );
+    return this.usersService.createOrUpdateUser(userId, email, displayName);
   }
 }

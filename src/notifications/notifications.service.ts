@@ -8,7 +8,7 @@ export interface Notification {
   type: 'expiration' | 'low_stock' | 'compliance' | 'system';
   title: string;
   message: string;
-  data?: any;
+  data?: Record<string, unknown>;
   isRead: boolean;
   sentAt?: Date;
   createdAt: Date;
@@ -22,7 +22,7 @@ function rowToNotification(row: any): Notification {
     type: row.type,
     title: row.title,
     message: row.message,
-    data: row.data,
+    data: row.data ?? undefined,
     isRead: row.is_read,
     sentAt: row.sent_at ? new Date(row.sent_at) : undefined,
     createdAt: new Date(row.created_at),

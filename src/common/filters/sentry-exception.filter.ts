@@ -63,15 +63,25 @@ export class SentryExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null
       ) {
         const responseObj = exceptionResponse as {
-          message?: unknown;
-          code?: unknown;
+          message?: string | string[];
+          code?: string | number;
         };
-        message =
-          responseObj.message !== undefined
-            ? String(responseObj.message)
-            : exception.message;
-        code =
-          responseObj.code !== undefined ? String(responseObj.code) : undefined;
+
+        const rawMessage = responseObj.message;
+        if (typeof rawMessage === 'string') {
+          message = rawMessage;
+        } else if (Array.isArray(rawMessage)) {
+          message = rawMessage.join(', ');
+        } else {
+          message = exception.message;
+        }
+
+        const rawCode = responseObj.code;
+        if (typeof rawCode === 'string' || typeof rawCode === 'number') {
+          code = String(rawCode);
+        } else {
+          code = undefined;
+        }
       } else {
         message = exception.message;
       }
@@ -80,7 +90,7 @@ export class SentryExceptionFilter implements ExceptionFilter {
     }
 
     // Capture exception in Sentry
-    if (status >= 500) {
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       // Only capture server errors (5xx)
       Sentry.captureException(exception, {
         tags: {
@@ -90,7 +100,7 @@ export class SentryExceptionFilter implements ExceptionFilter {
         },
         level: 'error',
       });
-    } else if (status >= 400) {
+    } else if (status >= HttpStatus.BAD_REQUEST) {
       // Log client errors (4xx) as warnings
       Sentry.captureException(exception, {
         tags: {

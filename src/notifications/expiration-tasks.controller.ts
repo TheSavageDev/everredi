@@ -1,14 +1,17 @@
 import {
-  Controller,
-  Post,
   Body,
-  Logger,
+  Controller,
+  Headers,
   HttpCode,
   HttpStatus,
   Inject,
+  Logger,
+  Post,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ConfigService } from '@nestjs/config';
 import { SUPABASE } from '../config/supabase.provider';
 import { NotificationsService } from './notifications.service';
 import { PushNotificationService } from './push-notification.service';
@@ -24,7 +27,36 @@ export class ExpirationTasksController {
     private readonly pushNotificationService: PushNotificationService,
     private readonly advancedNotificationsService: AdvancedNotificationsService,
     @Inject(SUPABASE) private readonly supabase: SupabaseClient,
+    private readonly configService: ConfigService,
   ) {}
+
+  private validateTaskAuth(taskSecretHeader?: string) {
+    const expectedSecret = this.configService.get<string>(
+      'CLOUD_TASKS_TASK_SECRET',
+    );
+    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
+
+    if (!expectedSecret) {
+      if (nodeEnv !== 'production') {
+        logger.warn(
+          'CLOUD_TASKS_TASK_SECRET is not configured; skipping task auth check in non-production environment.',
+        );
+        return;
+      }
+
+      logger.error(
+        'CLOUD_TASKS_TASK_SECRET is not configured in production. Rejecting Cloud Tasks request.',
+      );
+      throw new UnauthorizedException('Task authentication misconfigured');
+    }
+
+    if (!taskSecretHeader || taskSecretHeader !== expectedSecret) {
+      logger.warn(
+        'Received Cloud Tasks expiration request with invalid or missing x-task-secret header.',
+      );
+      throw new UnauthorizedException('Invalid task authentication');
+    }
+  }
 
   /**
    * Endpoint called by Cloud Tasks to send expiration notification
@@ -33,7 +65,12 @@ export class ExpirationTasksController {
   @Post('expiration')
   @SkipThrottle()
   @HttpCode(HttpStatus.OK)
-  async handleExpirationTask(@Body() payload: ExpirationTaskPayload) {
+  async handleExpirationTask(
+    @Body() payload: ExpirationTaskPayload,
+    @Headers('x-task-secret') taskSecret?: string,
+  ) {
+    this.validateTaskAuth(taskSecret);
+
     logger.log(
       `Processing expiration task for item ${payload.itemId}, ${payload.daysUntilExpiration} days before expiration`,
     );

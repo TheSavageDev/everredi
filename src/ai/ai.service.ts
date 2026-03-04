@@ -168,6 +168,12 @@ Return ONLY the JSON array, no other text.`;
 
       const recommendedItems: unknown = JSON.parse(jsonMatch[0]);
 
+      // Derive a simple confidence score based on the parsed payload.
+      let confidenceScore = 0.8;
+      if (Array.isArray(recommendedItems)) {
+        confidenceScore = recommendedItems.length > 0 ? 0.9 : 0.5;
+      }
+
       // Save recommendation
       const now = new Date();
       const { data, error } = await this.supabase
@@ -180,7 +186,7 @@ Return ONLY the JSON array, no other text.`;
           environment: request.environment,
           skill_level: request.skillLevel,
           recommended_items: recommendedItems,
-          confidence_score: 0.8, // TODO: Calculate actual confidence
+          confidence_score: confidenceScore,
           was_used: false,
           created_at: now.toISOString(),
         })
@@ -252,7 +258,10 @@ Return ONLY the JSON array, no other text.`;
         .limit(50);
 
       if (error) {
-        this.logger.error(`Failed to get recommendations: ${error.message}`, error);
+        this.logger.error(
+          `Failed to get recommendations: ${error.message}`,
+          error,
+        );
         throw new Error(`Failed to get recommendations: ${error.message}`);
       }
 
@@ -264,12 +273,17 @@ Return ONLY the JSON array, no other text.`;
         try {
           return rowToAiRecommendation(row);
         } catch (err) {
-          this.logger.error(`Error mapping recommendation row: ${err instanceof Error ? err.message : String(err)}`, row);
+          this.logger.error(
+            `Error mapping recommendation row: ${err instanceof Error ? err.message : String(err)}`,
+            row,
+          );
           throw err;
         }
       });
     } catch (err) {
-      this.logger.error(`Error in getRecommendations: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(
+        `Error in getRecommendations: ${err instanceof Error ? err.message : String(err)}`,
+      );
       throw err;
     }
   }

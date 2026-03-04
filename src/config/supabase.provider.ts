@@ -29,7 +29,7 @@ export class SupabaseApp {
       }
 
       // Create Supabase client with service role key for admin operations
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+
       this.client = createClient(supabaseUrl, supabaseServiceRoleKey, {
         auth: {
           autoRefreshToken: false,

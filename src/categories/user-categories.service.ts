@@ -122,7 +122,8 @@ export class UserCategoriesService {
     };
 
     if (updates.name !== undefined) updateData.name = updates.name;
-    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.description !== undefined)
+      updateData.description = updates.description;
     if (updates.icon !== undefined) updateData.icon_name = updates.icon;
     if (updates.order !== undefined) updateData.sort_order = updates.order;
 
@@ -175,7 +176,9 @@ export class UserCategoriesService {
         .eq('user_id', userId);
 
       if (error) {
-        throw new Error(`Failed to reorder category ${categoryIds[index]}: ${error.message}`);
+        throw new Error(
+          `Failed to reorder category ${categoryIds[index]}: ${error.message}`,
+        );
       }
     }
   }

@@ -15,8 +15,25 @@ export class EnvValidationService {
     const missing: string[] = [];
     const warnings: string[] = [];
 
+    const nodeEnv =
+      this.configService.get<string>('NODE_ENV') ||
+      process.env.NODE_ENV ||
+      'development';
+    const isProduction = nodeEnv === 'production';
+
     // Required environment variables
     const required = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY'];
+
+    // In production, additional integrations are required
+    if (isProduction) {
+      required.push(
+        'STRIPE_SECRET_KEY',
+        'STRIPE_WEBHOOK_SECRET',
+        'REVENUECAT_SECRET_API_KEY',
+        'REVENUECAT_WEBHOOK_SECRET',
+        'RESEND_API_KEY',
+      );
+    }
 
     // Check required vars
     for (const key of required) {

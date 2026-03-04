@@ -51,7 +51,7 @@ steps:
       - 'NODE_ENV=production,CORS_ORIGIN=${_CORS_ORIGIN},SENTRY_DSN=${_SENTRY_DSN},SENTRY_ENVIRONMENT=production,SENTRY_RELEASE=$SHORT_SHA,SENTRY_TRACES_SAMPLE_RATE=0.1,NO_COLOR=not-empty'
       - '--cpu-boost'
       - '--set-secrets'
-      - 'SUPABASE_URL=supabase-url-${_ENV}:latest,SUPABASE_SECRET_KEY=supabase-secret-key-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest'
+      - 'SUPABASE_URL=supabase-url-${_ENV}:latest,SUPABASE_SECRET_KEY=supabase-secret-key-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest,REVENUECAT_WEBHOOK_SECRET=revenuecat-webhook-secret-${_ENV}:latest,RESEND_API_KEY=resend-api-key-${_ENV}:latest'
       - '--memory'
       - '512Mi'
       - '--cpu'

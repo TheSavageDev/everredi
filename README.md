@@ -82,7 +82,7 @@ The API will be available at `http://localhost:5051` (or the port specified in y
 ### Health Check
 
 ```bash
-curl http://localhost:5051/health
+curl http://localhost:5051/api/health
 ```
 
 ## Testing
@@ -196,14 +196,18 @@ The API uses Supabase PostgreSQL for data storage. Each environment uses a separ
 
 See [migrations/README.md](./migrations/README.md) for migration documentation.
 
-For new installations, run the consolidated migration:
+For a fresh database, run the consolidated schema (includes RLS), then optionally the supply catalog and template seeds:
 ```bash
 psql -h your-supabase-host -U postgres -d your-database -f migrations/000_consolidated_schema.sql
+psql -h your-supabase-host -U postgres -d your-database -f migrations/001_seed_supply_catalog.sql   # optional
+psql -h your-supabase-host -U postgres -d your-database -f migrations/002_seed_kit_templates.sql     # optional, after 001
+psql -h your-supabase-host -U postgres -d your-database -f migrations/003_seed_osha_templates.sql   # optional, after 001
+psql -h your-supabase-host -U postgres -d your-database -f migrations/004_seed_uncharted_templates.sql   # optional, after 001
 ```
 
 ### Schema Documentation
 
-See [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) in the project root for complete schema documentation.
+See [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) for complete schema documentation.
 
 ## Deployment
 
@@ -239,7 +243,7 @@ The application uses NestJS Schedule for cron-based jobs:
 ### Health Check
 
 ```
-GET /health
+GET /api/health
 ```
 
 Returns service status and environment information.

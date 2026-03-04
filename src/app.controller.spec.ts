@@ -49,5 +49,15 @@ describe('AppController', () => {
       expect(result).toHaveProperty('service');
       expect(result).toHaveProperty('config');
     });
+
+    it('should return production shape when NODE_ENV is production', () => {
+      const orig = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      const result = appController.getHealth();
+      expect(result).toHaveProperty('status');
+      expect(result).toHaveProperty('environment', 'production');
+      expect(result).toHaveProperty('configOk');
+      process.env.NODE_ENV = orig;
+    });
   });
 });

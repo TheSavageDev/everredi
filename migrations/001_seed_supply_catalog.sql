@@ -62,6 +62,7 @@ VALUES
   ('Sterile Gauze Pads 2x2', 'Sterile gauze pads for wound dressing, 2x2 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Sterile Gauze Pads 3x4', 'Sterile gauze pads for wound dressing, 3x4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Sterile Gauze Pads 4x4', 'Sterile gauze pads for wound dressing, 4x4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Sterile Gauze Pads 8x10', 'Sterile gauze pads for wound dressing, 8x10 inches (OSHA/ANSI)', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Adhesive Bandages 2x4', 'Adhesive bandages, 2 inches by 4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'box', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Adhesive Bandages 3x4', 'Adhesive bandages, 3 inches by 4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'box', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Adhesive Bandages 4x4', 'Adhesive bandages, 4 inches by 4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'box', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
@@ -321,6 +322,53 @@ VALUES
 -- IV & Drug Delivery
   ('Syringe', 'Disposable syringe for medication administration', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
   ('Needle', 'Disposable hypodermic needle', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('IV Catheter', 'Intravenous catheter for vascular access', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('IV Administration Set', 'IV tubing and drip set for fluid and medication administration', 'f2a3b4c5-d6e7-4890-f123-456789012345', 'IV & Drug Delivery', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+ON CONFLICT DO NOTHING;
+
+-- Uncharted / premium kit supplies (for 004_seed_uncharted_templates; names match script)
+INSERT INTO supplies (name, description, category_id, category_name, brand, unit_type, base_unit, expires, default_expiration_days, osha_required, scope, tenant_id, created_at, updated_at)
+VALUES
+  ('Adhesive bandages (1x3 inches)', 'Fabric adhesive bandages 1 x 3 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'box', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Adhesive bandages (2x4 inches)', 'Fabric adhesive bandages 2 x 4 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'box', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Mylar Blanket', 'Emergency Mylar space blanket for warmth and shelter', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Blister Gels', 'Hydrocolloid blister gel dressings', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Blister Pads', 'Adhesive blister pads for prevention and treatment', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Triple Antibiotic', 'Triple antibiotic ointment for wound care', 'b2c3d4e5-f6a7-4890-b123-456789012345', 'Medications & Ointments', NULL, 'tube', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('Wound Closure Stripes', 'Adhesive wound closure strips', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Hemostatic gauze', 'Hemostatic gauze for bleeding control', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Gauze Pads (3x3 inches)', 'Sterile gauze pads 3 x 3 inches', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Slishman Pressure Bandage', 'Emergency pressure bandage for controlling bleeding', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Bailing Wire', 'Multi-use bailing wire for repairs and improvising', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Flat Pack Duct Tape', 'Compact flat-pack duct tape', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'roll', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Flat Pack stormproof matches', 'Stormproof matches in flat pack', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Reusable Zip Ties', 'Releasable or reusable cable ties', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Signaling Mirror', 'Emergency signaling mirror', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Fishing Kit', 'Compact emergency fishing kit', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Ferro Rod', 'Ferrocerium rod for fire starting', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Tinder', 'Fire tinder for emergency use', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Water Purification Tablets', 'Water purification tablets', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Hypo-allergenic Medical Tape', 'Hypoallergenic adhesive tape for sensitive skin', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'roll', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Splinter Probes', 'Splinter probe or removal tools', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Shears', 'Bandage or trauma shears', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Flashlight', 'Compact flashlight or torch', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('First Aid Guide & Notebook', 'First aid instructions with notepad', 'd0e1f2a3-b4c5-4678-d901-234567890123', 'Documentation & Reference', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Chem Lights', 'Chemical light sticks', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Stormproof Matches', 'Stormproof or waterproof matches', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Non-Adhesive Cotton Gauze Sponges', 'Non-adherent cotton gauze sponges', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Zip Ties - 7 inches', 'Cable ties 7 inches', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Burn Cream', 'Topical burn cream or gel', 'a7b8c9d0-e1f2-4345-a678-901234567890', 'Burn Care', NULL, 'tube', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('Saline Tube (30mL)', 'Sterile saline in single-use tube', 'b2c3d4e5-f6a7-4890-b123-456789012345', 'Medications & Ointments', NULL, 'tube', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('Antiseptic Towelette', 'Single-use antiseptic towelette', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('CPR Kit', 'CPR kit with mask or barrier', 'c9d0e1f2-a3b4-4567-c890-123456789012', 'Respiratory', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('CPR Mask', 'Disposable resuscitation face mask', 'c9d0e1f2-a3b4-4567-c890-123456789012', 'Respiratory', NULL, 'piece', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Multi-tool Pro', 'Multi-tool for repairs and first aid', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Permanent Marker', 'Permanent marker for labeling', 'c3d4e5f6-a7b8-4901-c234-567890123456', 'Tools & Instruments', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Conforming Bandage', 'Conforming cotton bandage for wrapping', 'a1b2c3d4-e5f6-4789-a012-345678901234', 'Bandages & Wound Care', NULL, 'roll', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Lube Jelly', 'Lubricating jelly single-use packets', 'b2c3d4e5-f6a7-4890-b123-456789012345', 'Medications & Ointments', NULL, 'pack', 'each', true, 1825, false, 'global', NULL, NOW(), NOW()),
+  ('Carrying Pouch', 'Water-resistant carrying pouch', 'd4e5f6a7-b8c9-4012-d345-678901234567', 'Emergency & Trauma', NULL, 'piece', 'each', false, NULL, false, 'global', NULL, NOW(), NOW()),
+  ('Alcohol Wipes', 'Alcohol prep wipes', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', true, 730, false, 'global', NULL, NOW(), NOW()),
+  ('Dog Waste Bags', 'Degradable dog waste bags', 'f6a7b8c9-d0e1-4234-f567-890123456789', 'Hygiene & Sanitation', NULL, 'pack', 'each', false, NULL, false, 'global', NULL, NOW(), NOW())
 ON CONFLICT DO NOTHING;
 
 -- =========================

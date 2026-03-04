@@ -17,7 +17,6 @@ interface InventoryItem {
   supply_name: string;
   expiration_date?: string;
   status: 'complete' | 'partial' | 'missing' | 'used' | 'disposed' | 'expired';
-  sent_notifications?: string[]; // Array of days (e.g., ['60', '30', '10', '1'])
 }
 
 const DEFAULT_ALERT_DAYS = [60, 30, 10, 1];
@@ -153,7 +152,7 @@ export class ExpirationNotificationsService {
             if (
               daysUntilExpiration <= thresholdDays &&
               daysUntilExpiration > nextSmallerAlert &&
-              !this.hasNotificationBeenSent(item, thresholdDays)
+              !(await this.hasNotificationBeenSent(userId, item.id, thresholdDays))
             ) {
               if (!isPremium && remindersCreatedForUser >= maxFreeReminders) {
                 continue;
@@ -165,7 +164,7 @@ export class ExpirationNotificationsService {
                   thresholdDays,
                   daysUntilExpiration,
                 );
-                await this.markNotificationAsSent(item.id, thresholdDays);
+                await this.markNotificationAsSent(userId, item.id, thresholdDays);
                 totalNotificationsSent++;
                 remindersCreatedForUser++;
                 logger.log(
@@ -233,43 +232,59 @@ export class ExpirationNotificationsService {
     return (tenantItems || []) as InventoryItem[];
   }
 
-  /**
-   * Check if a notification for a specific day threshold has already been sent
-   */
-  private hasNotificationBeenSent(
-    item: InventoryItem,
-    alertDays: number,
-  ): boolean {
-    const sentNotifications = item.sent_notifications || [];
-    return sentNotifications.includes(String(alertDays));
+  private static expiryEventKey(itemId: string, alertDays: number): string {
+    return `expiry:${itemId}:${alertDays}`;
   }
 
   /**
-   * Mark a notification as sent for an item
+   * Check if a notification for this item/threshold has already been sent (via notification_events)
+   */
+  private async hasNotificationBeenSent(
+    userId: string,
+    itemId: string,
+    alertDays: number,
+  ): Promise<boolean> {
+    const eventKey = ExpirationNotificationsService.expiryEventKey(
+      itemId,
+      alertDays,
+    );
+    const { data, error } = await this.supabase
+      .from('notification_events')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('event_key', eventKey)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      logger.warn(`Failed to check notification_events: ${error.message}`);
+      return false;
+    }
+    return data != null;
+  }
+
+  /**
+   * Record that we sent an expiration notification (in notification_events)
    */
   private async markNotificationAsSent(
+    userId: string,
     itemId: string,
     alertDays: number,
   ): Promise<void> {
-    const { data: item } = await this.supabase
-      .from('inventory_items')
-      .select('sent_notifications')
-      .eq('id', itemId)
-      .single();
-
-    if (!item) {
-      return;
-    }
-
-    const currentSent = (item.sent_notifications as string[]) || [];
-    const updatedSent = [...new Set([...currentSent, String(alertDays)])];
-
-    await this.supabase
-      .from('inventory_items')
-      .update({
-        sent_notifications: updatedSent,
-      })
-      .eq('id', itemId);
+    const eventKey = ExpirationNotificationsService.expiryEventKey(
+      itemId,
+      alertDays,
+    );
+    await this.supabase.from('notification_events').upsert(
+      {
+        user_id: userId,
+        event_key: eventKey,
+        channel: 'inapp',
+        sent_at: new Date().toISOString(),
+        meta: { itemId, alertDays },
+      },
+      { onConflict: 'user_id,event_key', ignoreDuplicates: true },
+    );
   }
 
   /**

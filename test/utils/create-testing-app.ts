@@ -192,6 +192,12 @@ export async function createTestingApp(
     createCustomerPortalSession: jest.fn().mockResolvedValue({
       url: 'https://billing.stripe.com/test',
     } as any),
+    handleWebhook: jest.fn().mockImplementation((payload: string, signature: string) => {
+      if (signature === 'valid' || signature?.startsWith('valid_')) {
+        return { id: 'evt_test_123', type: 'checkout.session.completed' } as any;
+      }
+      throw new Error('Invalid signature');
+    }),
   };
 
   const subscriptionsServiceMock: Partial<SubscriptionsService> = {
@@ -202,6 +208,7 @@ export async function createTestingApp(
     createCustomerPortalSession: jest.fn().mockResolvedValue({
       url: 'https://billing.stripe.com/test',
     }),
+    handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
   };
 
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -220,7 +227,9 @@ export async function createTestingApp(
     .useValue(subscriptionsServiceMock)
     .compile();
 
-  const app = moduleFixture.createNestApplication();
+  const app = moduleFixture.createNestApplication({
+    rawBody: true, // Required for Stripe webhook tests (req.rawBody)
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

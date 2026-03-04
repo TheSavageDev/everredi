@@ -36,16 +36,18 @@ export class ExpirationTasksController {
     );
     const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
 
+    const requireSecret = nodeEnv === 'production' || nodeEnv === 'staging';
+
     if (!expectedSecret) {
-      if (nodeEnv !== 'production') {
+      if (!requireSecret) {
         logger.warn(
-          'CLOUD_TASKS_TASK_SECRET is not configured; skipping task auth check in non-production environment.',
+          'CLOUD_TASKS_TASK_SECRET is not configured; skipping task auth check in development.',
         );
         return;
       }
 
       logger.error(
-        'CLOUD_TASKS_TASK_SECRET is not configured in production. Rejecting Cloud Tasks request.',
+        `CLOUD_TASKS_TASK_SECRET is not configured in ${nodeEnv}. Rejecting Cloud Tasks request.`,
       );
       throw new UnauthorizedException('Task authentication misconfigured');
     }
@@ -106,7 +108,7 @@ export class ExpirationTasksController {
       }
 
       // Check if expiration date has changed
-      if (item.expiration_date) {
+      if (item?.expiration_date) {
         const itemExpirationDate = new Date(item.expiration_date);
         const expectedExpirationDate = new Date(payload.expirationDate);
 

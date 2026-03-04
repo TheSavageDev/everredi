@@ -202,6 +202,8 @@ echo -n "whsec_test_xxxxx" | gcloud secrets create stripe-webhook-secret-dev --d
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-dev --data-file=-
 # RevenueCat (optional but recommended for mobile subscriptions)
 echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-dev --data-file=-
+echo -n "your-revenuecat-webhook-secret" | gcloud secrets create revenuecat-webhook-secret-dev --data-file=-
+echo -n "re_xxxxx" | gcloud secrets create resend-api-key-dev --data-file=-
 
 # Staging environment (shares Supabase with dev - copy the same values)
 echo -n "https://xxxxx-dev.supabase.co" | gcloud secrets create supabase-url-staging --data-file=-
@@ -216,6 +218,8 @@ echo -n "sk_test_xxxxx" | gcloud secrets create stripe-secret-key-staging --data
 echo -n "whsec_test_xxxxx" | gcloud secrets create stripe-webhook-secret-staging --data-file=-
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-staging --data-file=-
 echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-staging --data-file=-
+echo -n "your-revenuecat-webhook-secret" | gcloud secrets create revenuecat-webhook-secret-staging --data-file=-
+echo -n "re_xxxxx" | gcloud secrets create resend-api-key-staging --data-file=-
 
 # Production environment (separate Supabase project)
 echo -n "https://xxxxx-prod.supabase.co" | gcloud secrets create supabase-url-prod --data-file=-
@@ -224,6 +228,8 @@ echo -n "sk_live_xxxxx" | gcloud secrets create stripe-secret-key-prod --data-fi
 echo -n "whsec_live_xxxxx" | gcloud secrets create stripe-webhook-secret-prod --data-file=-
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key-prod --data-file=-
 echo -n "your-revenuecat-secret-api-key" | gcloud secrets create revenuecat-secret-api-key-prod --data-file=-
+echo -n "your-revenuecat-webhook-secret" | gcloud secrets create revenuecat-webhook-secret-prod --data-file=-
+echo -n "re_xxxxx" | gcloud secrets create resend-api-key-prod --data-file=-
 ```
 
 Grant Cloud Run service account access to secrets:
@@ -233,7 +239,7 @@ SERVICE_ACCOUNT="924111630132-compute@developer.gserviceaccount.com"
 
 # Grant access to all environment secrets
 for env in dev staging prod; do
-  for secret in supabase-url supabase-secret-key stripe-secret-key stripe-webhook-secret gemini-api-key revenuecat-secret-api-key; do
+  for secret in supabase-url supabase-secret-key stripe-secret-key stripe-webhook-secret gemini-api-key revenuecat-secret-api-key revenuecat-webhook-secret resend-api-key; do
     gcloud secrets add-iam-policy-binding ${secret}-${env} \
       --member="serviceAccount:${SERVICE_ACCOUNT}" \
       --role="roles/secretmanager.secretAccessor" || true
@@ -447,7 +453,8 @@ Secrets should be created with environment suffixes for isolation:
 - `stripe-webhook-secret-{env}`: Stripe webhook secret (dev, staging, prod)
 - `gemini-api-key-{env}`: Google Gemini API key (dev, staging, prod)
 - `revenuecat-secret-api-key-{env}`: RevenueCat Secret API Key (optional but recommended for mobile subscriptions)
-- `resend-api-key-{env}`: Resend API key for support emails (optional; see [Resend](https://resend.com) for setup; requires a verified domain or use their onboarding domain for "from" address)
+- `revenuecat-webhook-secret-{env}`: RevenueCat webhook verification secret (required in production for RevenueCat webhook endpoint)
+- `resend-api-key-{env}`: Resend API key for support emails (required in production; see [Resend](https://resend.com) for setup)
 
 Example: `supabase-url-dev`, `supabase-url-staging`, `supabase-url-prod`
 
@@ -537,3 +544,4 @@ Response:
 - CORS is configured per environment
 - Supabase projects are isolated per environment
 - Service role keys have admin privileges - keep them secret
+- **Row Level Security (RLS):** `000_consolidated_schema.sql` enables RLS and creates all policies. No separate RLS migrations. The API uses the service role and bypasses RLS; RLS is defense-in-depth for anon/authenticated access.

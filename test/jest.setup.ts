@@ -6,6 +6,10 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 // Provide safe default env vars used in the app so tests don't depend on real secrets
 process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+process.env.SUPABASE_URL =
+  process.env.SUPABASE_URL || 'https://test-project.supabase.co';
+process.env.SUPABASE_SECRET_KEY =
+  process.env.SUPABASE_SECRET_KEY || 'test-service-role-key';
 process.env.STRIPE_SECRET_KEY =
   process.env.STRIPE_SECRET_KEY || 'sk_test_dummy';
 process.env.STRIPE_WEBHOOK_SECRET =

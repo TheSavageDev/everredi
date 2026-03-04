@@ -2,14 +2,17 @@
 -- Utility Functions
 -- =========================
 
--- Function to update updated_at timestamp
+-- Function to update updated_at timestamp (search_path set for security/advisory)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- =========================
 -- Enums
@@ -24,15 +27,11 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE kit_status AS ENUM ('active', 'archived');
+  CREATE TYPE kit_status AS ENUM ('active', 'archived', 'incomplete', 'complete');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE TYPE permission_level AS ENUM ('view', 'edit', 'admin');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-  CREATE TYPE inventory_lot_status AS ENUM ('active', 'expired', 'used', 'disposed');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- =========================
@@ -254,6 +253,7 @@ CREATE TABLE IF NOT EXISTS kit_templates (
   public_template_id VARCHAR(255),
   created_by VARCHAR(255),
   is_active BOOLEAN NOT NULL DEFAULT true,
+  requires_premium BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -341,14 +341,20 @@ CREATE TRIGGER trg_kits_updated_at
 -- Consolidated Inventory Items
 -- =========================
 -- This table consolidates both kit_items and inventory_items
--- - Items in kits: kit_id is set
+-- - Items in kits: kit_id is set; one row per (kit, supply or freeform)
 -- - Items not in kits: kit_id is NULL
--- - Requirements/placeholders: is_requirement = true and/or quantity = 0
+-- - required_quantity / actual_quantity drive fulfillment; status is enum (complete, partial, missing, etc.)
+
+DO $$ BEGIN
+  CREATE TYPE inventory_item_status AS ENUM (
+    'complete', 'partial', 'missing', 'used', 'disposed', 'expired'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS inventory_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  kit_id UUID REFERENCES kits(id) ON DELETE SET NULL, -- NULL = not in a kit
+  kit_id UUID REFERENCES kits(id) ON DELETE CASCADE, -- NULL = not in a kit
   supply_id UUID REFERENCES supplies(id) ON DELETE SET NULL,
   freeform_name TEXT, -- Required if supply_id is NULL
   supply_name VARCHAR(255) NOT NULL, -- Denormalized for performance
@@ -356,12 +362,13 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
   location_name VARCHAR(255), -- Denormalized
   
-  -- Quantity and status
-  quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-  is_requirement BOOLEAN NOT NULL DEFAULT false, -- true = placeholder/requirement, false = actual item
-  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'used', 'disposed', 'missing')),
+  -- Quantity and status (fulfillment + lifecycle)
+  required_quantity INTEGER CHECK (required_quantity >= 0),
+  actual_quantity INTEGER CHECK (actual_quantity >= 0),
+  lot_code TEXT,
+  status inventory_item_status NOT NULL DEFAULT 'missing',
   
-  -- Expiration tracking (simple case, complex cases use inventory_lots)
+  -- Expiration tracking
   expiration_date TIMESTAMP,
   
   -- Purchase info
@@ -372,7 +379,6 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   -- Metadata
   notes TEXT,
   custom_fields JSONB,
-  sent_notifications TEXT[], -- DEPRECATED: Use notification_events instead
   
   -- Timestamps
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -391,11 +397,13 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_kit_id ON inventory_items(kit_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_items_supply_id ON inventory_items(supply_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_location_id ON inventory_items(location_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_status ON inventory_items(status);
-CREATE INDEX IF NOT EXISTS idx_inventory_items_is_requirement ON inventory_items(is_requirement);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_expiration_date ON inventory_items(expiration_date) WHERE expiration_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_inventory_items_expiring ON inventory_items(status, expiration_date) WHERE status = 'active' AND expiration_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_expiring ON inventory_items(expiration_date) WHERE expiration_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant_status ON inventory_items(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_inventory_items_kit_status ON inventory_items(kit_id, status) WHERE kit_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_required_quantity ON inventory_items(required_quantity) WHERE required_quantity IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_actual_quantity ON inventory_items(actual_quantity) WHERE actual_quantity IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inventory_items_lot_code ON inventory_items(lot_code) WHERE lot_code IS NOT NULL;
 
 -- Unique constraints for inventory_items
 CREATE UNIQUE INDEX IF NOT EXISTS ux_inventory_items_kit_supply
@@ -408,30 +416,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_inventory_items_kit_freeform
 
 CREATE TRIGGER update_inventory_items_updated_at
   BEFORE UPDATE ON inventory_items
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- Inventory lots table (for multiple expirations per item)
-CREATE TABLE IF NOT EXISTS inventory_lots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
-  quantity_units INTEGER NOT NULL CHECK (quantity_units >= 0),
-  expiration_date DATE,
-  lot_code TEXT,
-  purchase_date DATE,
-  purchase_price NUMERIC(10, 2),
-  supplier TEXT,
-  status inventory_lot_status NOT NULL DEFAULT 'active',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_inventory_lots_item_exp ON inventory_lots(inventory_item_id, expiration_date);
-CREATE INDEX IF NOT EXISTS idx_inventory_lots_status_exp ON inventory_lots(status, expiration_date);
-CREATE INDEX IF NOT EXISTS idx_inventory_lots_item ON inventory_lots(inventory_item_id);
-
-CREATE TRIGGER trg_inventory_lots_updated_at
-  BEFORE UPDATE ON inventory_lots
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
@@ -761,40 +745,130 @@ CREATE INDEX IF NOT EXISTS idx_ai_recommendations_user_created ON ai_recommendat
 -- Views
 -- =========================
 
--- View for kit actual units (from inventory_lots)
-CREATE OR REPLACE VIEW v_kit_actual_units AS
-SELECT
-  k.id AS kit_id,
-  COALESCE(ii.supply_id::text, ii.freeform_name) AS supply_key,
-  SUM(il.quantity_units) AS actual_units
-FROM kits k
-JOIN inventory_items ii ON ii.kit_id = k.id
-JOIN inventory_lots il ON il.inventory_item_id = ii.id
-WHERE
-  k.deleted_at IS NULL
-  AND il.status = 'active'
-  AND (il.expiration_date IS NULL OR il.expiration_date >= CURRENT_DATE)
-GROUP BY k.id, COALESCE(ii.supply_id::text, ii.freeform_name);
-
--- View for kit item status (for requirements)
+-- Kit item status: required/actual and status from inventory_items (kit rows only)
 CREATE OR REPLACE VIEW v_kit_item_status AS
 SELECT
   ii.id AS inventory_item_id,
   ii.kit_id,
   ii.supply_id,
   COALESCE(ii.supply_name, ii.freeform_name) AS supply_name,
-  ii.quantity AS required_quantity,
-  COALESCE(va.actual_units, 0) AS actual_quantity,
-  CASE
-    WHEN COALESCE(va.actual_units, 0) >= ii.quantity THEN 'complete'
-    WHEN COALESCE(va.actual_units, 0) > 0 THEN 'partial'
-    ELSE 'missing'
-  END AS status
+  ii.required_quantity,
+  COALESCE(ii.actual_quantity, 0) AS actual_quantity,
+  ii.status
 FROM inventory_items ii
-LEFT JOIN v_kit_actual_units va
-  ON va.kit_id = ii.kit_id
-  AND (
-    (ii.supply_id IS NOT NULL AND va.supply_key = ii.supply_id::text) OR
-    (ii.supply_id IS NULL AND va.supply_key = ii.freeform_name)
-  )
+JOIN kits k ON k.id = ii.kit_id AND k.deleted_at IS NULL
 WHERE ii.kit_id IS NOT NULL;
+
+-- =============================================================================
+-- Row Level Security (RLS)
+-- =============================================================================
+-- API uses service role and bypasses RLS; these policies protect anon/authenticated access.
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_defaults ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supply_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supplies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supply_variants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kit_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kit_template_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kit_template_revision_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kit_acl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE share_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE device_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE affiliate_tracking ENABLE ROW LEVEL SECURITY;
+ALTER TABLE brand_partnerships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE revenuecat_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_recommendations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE osha_compliance_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE compliance_checks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scheduled_broadcasts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alert_thresholds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE low_stock_alerts ENABLE ROW LEVEL SECURITY;
+
+-- User-owned
+CREATE POLICY "users_select_own" ON users FOR SELECT USING ((select auth.uid()) = id);
+CREATE POLICY "users_insert_own" ON users FOR INSERT WITH CHECK ((select auth.uid()) = id);
+CREATE POLICY "users_update_own" ON users FOR UPDATE USING ((select auth.uid()) = id);
+
+CREATE POLICY "locations_own" ON locations FOR ALL USING ((select auth.uid()) = user_id);
+
+CREATE POLICY "notifications_own" ON notifications FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "device_tokens_own" ON device_tokens FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "custom_fields_own" ON custom_fields FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "user_categories_own" ON user_categories FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "api_keys_own" ON api_keys FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "support_tickets_own" ON support_tickets FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "affiliate_tracking_own" ON affiliate_tracking FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "revenuecat_customers_own" ON revenuecat_customers FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "ai_recommendations_own" ON ai_recommendations FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "compliance_checks_own" ON compliance_checks FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "alert_thresholds_own" ON alert_thresholds FOR ALL USING ((select auth.uid()) = user_id);
+CREATE POLICY "low_stock_alerts_own" ON low_stock_alerts FOR ALL USING ((select auth.uid()) = user_id);
+
+-- Tenant-scoped
+CREATE POLICY "tenants_owner" ON tenants FOR ALL USING ((select auth.uid()) = owner_user_id);
+
+CREATE POLICY "tenant_members_select" ON tenant_members FOR SELECT USING (EXISTS (SELECT 1 FROM tenants t WHERE t.id = tenant_id AND t.owner_user_id = (select auth.uid())));
+CREATE POLICY "tenant_members_insert" ON tenant_members FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM tenants t WHERE t.id = tenant_id AND t.owner_user_id = (select auth.uid())));
+CREATE POLICY "tenant_members_update" ON tenant_members FOR UPDATE USING (EXISTS (SELECT 1 FROM tenants t WHERE t.id = tenant_id AND t.owner_user_id = (select auth.uid())));
+CREATE POLICY "tenant_members_delete" ON tenant_members FOR DELETE USING (EXISTS (SELECT 1 FROM tenants t WHERE t.id = tenant_id AND t.owner_user_id = (select auth.uid())));
+
+CREATE POLICY "user_defaults_own" ON user_defaults FOR ALL USING ((select auth.uid()) = user_id);
+
+CREATE POLICY "kits_tenant" ON kits FOR ALL USING (EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = kits.tenant_id AND tm.user_id = (select auth.uid())));
+
+CREATE POLICY "inventory_items_tenant" ON inventory_items FOR ALL USING (EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = inventory_items.tenant_id AND tm.user_id = (select auth.uid())));
+
+CREATE POLICY "kit_acl_tenant" ON kit_acl FOR ALL USING (EXISTS (SELECT 1 FROM kits k INNER JOIN tenant_members tm ON tm.tenant_id = k.tenant_id AND tm.user_id = (select auth.uid()) WHERE k.id = kit_acl.kit_id));
+
+CREATE POLICY "notification_preferences_tenant" ON notification_preferences FOR ALL USING (EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = notification_preferences.tenant_id AND tm.user_id = (select auth.uid())));
+
+CREATE POLICY "notification_events_own" ON notification_events FOR ALL USING ((select auth.uid()) = user_id);
+
+-- Kit templates: select own or public; modify own only
+CREATE POLICY "kit_templates_select" ON kit_templates FOR SELECT USING (user_id = (select auth.uid()) OR is_public = true);
+CREATE POLICY "kit_templates_insert" ON kit_templates FOR INSERT WITH CHECK (user_id = (select auth.uid()));
+CREATE POLICY "kit_templates_update" ON kit_templates FOR UPDATE USING (user_id = (select auth.uid()));
+CREATE POLICY "kit_templates_delete" ON kit_templates FOR DELETE USING (user_id = (select auth.uid()));
+
+-- Kit template revisions: one policy per operation (SELECT = owner or public)
+CREATE POLICY "kit_template_revisions_select" ON kit_template_revisions FOR SELECT USING (EXISTS (SELECT 1 FROM kit_templates kt WHERE kt.id = kit_template_revisions.kit_template_id AND (kt.user_id = (select auth.uid()) OR kt.is_public = true)));
+CREATE POLICY "kit_template_revisions_insert" ON kit_template_revisions FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM kit_templates kt WHERE kt.id = kit_template_revisions.kit_template_id AND kt.user_id = (select auth.uid())));
+CREATE POLICY "kit_template_revisions_update" ON kit_template_revisions FOR UPDATE USING (EXISTS (SELECT 1 FROM kit_templates kt WHERE kt.id = kit_template_revisions.kit_template_id AND kt.user_id = (select auth.uid())));
+CREATE POLICY "kit_template_revisions_delete" ON kit_template_revisions FOR DELETE USING (EXISTS (SELECT 1 FROM kit_templates kt WHERE kt.id = kit_template_revisions.kit_template_id AND kt.user_id = (select auth.uid())));
+
+CREATE POLICY "kit_template_revision_items_all" ON kit_template_revision_items FOR ALL USING (EXISTS (SELECT 1 FROM kit_template_revisions r INNER JOIN kit_templates kt ON kt.id = r.kit_template_id WHERE r.id = kit_template_revision_items.template_revision_id AND kt.user_id = (select auth.uid())));
+
+-- Share links, teams
+CREATE POLICY "share_links_own" ON share_links FOR ALL USING ((select auth.uid()) = owner_id);
+
+CREATE POLICY "teams_owner" ON teams FOR ALL USING ((select auth.uid()) = owner_id);
+
+CREATE POLICY "team_members_visible" ON team_members FOR SELECT USING (user_id = (select auth.uid()) OR EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND t.owner_id = (select auth.uid())));
+CREATE POLICY "team_members_insert" ON team_members FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND t.owner_id = (select auth.uid())));
+CREATE POLICY "team_members_update" ON team_members FOR UPDATE USING (EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND t.owner_id = (select auth.uid())));
+CREATE POLICY "team_members_delete" ON team_members FOR DELETE USING (EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND t.owner_id = (select auth.uid())));
+
+-- Catalog / reference: read-only for authenticated
+CREATE POLICY "supply_categories_select" ON supply_categories FOR SELECT TO authenticated USING (true);
+CREATE POLICY "supplies_select" ON supplies FOR SELECT TO authenticated USING (true);
+CREATE POLICY "supply_variants_select" ON supply_variants FOR SELECT TO authenticated USING (true);
+CREATE POLICY "osha_compliance_rules_select" ON osha_compliance_rules FOR SELECT TO authenticated USING (true);
+CREATE POLICY "brand_partnerships_select" ON brand_partnerships FOR SELECT TO authenticated USING (true);
+
+-- Admin-only
+CREATE POLICY "scheduled_broadcasts_admin" ON scheduled_broadcasts FOR ALL USING (EXISTS (SELECT 1 FROM users u WHERE u.id = (select auth.uid()) AND u.is_admin = true));

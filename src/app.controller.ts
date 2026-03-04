@@ -15,6 +15,17 @@ export class AppController {
   getHealth() {
     const validation = this.envValidation.validate();
     const configStatus = this.envValidation.getConfigStatus();
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    if (isProduction) {
+      return {
+        status: validation.isValid ? 'ok' : 'degraded',
+        timestamp: new Date().toISOString(),
+        service: 'everredi-api',
+        environment: 'production',
+        configOk: validation.isValid,
+      };
+    }
 
     return {
       status: validation.isValid ? 'ok' : 'degraded',

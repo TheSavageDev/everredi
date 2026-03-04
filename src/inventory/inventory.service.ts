@@ -85,7 +85,7 @@ function rowToInventoryItem(
     supplier: row.supplier,
     notes: row.notes,
     status: row.status,
-    sentNotifications: row.sent_notifications || [],
+    sentNotifications: [], // deprecated: tracking now in notification_events
     customFields: row.custom_fields,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -742,16 +742,12 @@ export class InventoryService {
         oldExpirationDate.getTime() !== newExpirationDate.getTime();
 
       if (expirationChanged) {
-        // Reset sent notifications so cron job can send new alerts for the new expiration date
-        processedUpdates.sent_notifications = [];
         logger.log(
-          `Expiration date changed for item ${itemId}, resetting sent notifications`,
+          `Expiration date changed for item ${itemId}; notification_events will drive new alerts`,
         );
       }
     } else if (updates.expirationDate === null) {
-      // Expiration date was removed - clear sent notifications
       processedUpdates.expiration_date = null;
-      processedUpdates.sent_notifications = [];
     }
 
     processedUpdates.updated_at = new Date().toISOString();

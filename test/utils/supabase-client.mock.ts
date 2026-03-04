@@ -87,6 +87,11 @@ export function createSupabaseClientMock(): TestSupabaseClient {
       result = result.slice(0, limitCount);
     }
 
+    // Apply range (Supabase .range(from, to) inclusive)
+    if (state?.rangeFrom != null && state?.rangeTo != null) {
+      result = result.slice(state.rangeFrom, state.rangeTo + 1);
+    }
+
     // Apply select fields
     if (selectFields) {
       result = result.map((row: any) => {
@@ -131,6 +136,8 @@ export function createSupabaseClientMock(): TestSupabaseClient {
       filters: [] as Array<{ field: string; operator: string; value: any }>,
       orderBy: null as { field: string; ascending: boolean } | null,
       limitCount: null as number | null,
+      rangeFrom: null as number | null,
+      rangeTo: null as number | null,
       singleMode: false,
       maybeSingleMode: false,
       selectFields: null as string[] | null,
@@ -209,6 +216,12 @@ export function createSupabaseClientMock(): TestSupabaseClient {
           ? options?.ascending !== false
           : options !== 'desc';
       state.orderBy = { field, ascending };
+      return builder;
+    };
+
+    builder.range = (from: number, to: number) => {
+      state.rangeFrom = from;
+      state.rangeTo = to;
       return builder;
     };
 
@@ -325,6 +338,32 @@ export function createSupabaseClientMock(): TestSupabaseClient {
       Object.assign(insertBuilder, simpleInsertPromise);
 
       return insertBuilder;
+    });
+
+    builder.upsert = jest.fn((values: any, options?: { onConflict?: string }) => {
+      const insertData = Array.isArray(values) ? values : [values];
+      for (const row of insertData) {
+        const key = options?.onConflict ? row[options.onConflict] : row.id;
+        const id = key ?? row.id ?? `id-${Date.now()}`;
+        mockDocuments.set(`${table}:${id}`, {
+          ...row,
+          updated_at: row.updated_at || new Date().toISOString(),
+        });
+      }
+      const existing = getTableData(table);
+      const merged = insertData.reduce((acc: any[], row: any) => {
+        const conflictKey = options?.onConflict ? row[options.onConflict] : null;
+        if (conflictKey) {
+          const idx = acc.findIndex((r: any) => r[options!.onConflict!] === conflictKey);
+          if (idx >= 0) acc[idx] = { ...acc[idx], ...row };
+          else acc.push(row);
+        } else {
+          acc.push(row);
+        }
+        return acc;
+      }, [...existing]);
+      setTableData(table, merged);
+      return Promise.resolve({ data: insertData, error: null });
     });
 
     builder.update = jest.fn((values: any) => {

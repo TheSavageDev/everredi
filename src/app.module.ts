@@ -63,6 +63,11 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
         ttl: 3600000, // 1 hour
         limit: 5, // 5 support contact requests per hour per IP
       },
+      {
+        name: 'authSync',
+        ttl: 60000, // 1 minute
+        limit: isDevelopment ? 10000 : 20, // 20 auth sync requests per minute per IP in prod
+      },
     ]),
     ConfigModule,
     SupabaseModule,

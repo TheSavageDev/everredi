@@ -204,6 +204,27 @@ export class UsersService {
   }
 
   /**
+   * Get user by Stripe customer ID (for webhook fallback when session metadata has no userId).
+   */
+  async getUserByStripeCustomerId(stripeCustomerId: string): Promise<User | null> {
+    if (!stripeCustomerId) return null;
+    const { data, error } = await this.supabase
+      .from('users')
+      .select('*')
+      .eq('stripe_customer_id', stripeCustomerId)
+      .single();
+
+    if (error || !data) {
+      if (error?.code === 'PGRST116') return null;
+      this.logger.error(
+        `Error fetching user by stripe_customer_id: ${error?.message}`,
+      );
+      return null;
+    }
+    return rowToUser(data);
+  }
+
+  /**
    * List users for admin (paginated, optional email search).
    */
   async listUsers(filters?: {

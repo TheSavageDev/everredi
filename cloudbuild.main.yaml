@@ -50,7 +50,7 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,CORS_ORIGIN=${_CORS_ORIGIN},NO_COLOR=not-empty'
       - '--set-secrets'
-      - 'SUPABASE_URL=supabase-url-${_ENV}:latest,SUPABASE_SECRET_KEY=supabase-secret-key-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest'
+      - 'SUPABASE_URL=supabase-url-${_ENV}:latest,SUPABASE_SECRET_KEY=supabase-secret-key-${_ENV}:latest,STRIPE_SECRET_KEY=stripe-secret-key-${_ENV}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret-${_ENV}:latest,GEMINI_API_KEY=gemini-api-key-${_ENV}:latest,REVENUECAT_SECRET_API_KEY=revenuecat-secret-api-key-${_ENV}:latest,REVENUECAT_WEBHOOK_SECRET=revenuecat-webhook-secret-${_ENV}:latest'
       - '--memory'
       - '512Mi'
       - '--cpu'

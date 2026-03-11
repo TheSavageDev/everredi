@@ -1,4 +1,5 @@
 import { Controller, Post, UseGuards, Req, Logger } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
@@ -17,21 +18,23 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('create-or-update')
+  @Throttle({ authSync: { limit: 20, ttl: 60000 } })
   @UseGuards(SupabaseAuthGuard)
   async createOrUpdateUser(
     @CurrentUser() user: SupabaseUser,
     @Req() request: Request,
   ) {
-    // Log auth attempt for security monitoring
     const ip =
       request.ip ||
       request.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
       'unknown';
-    const timestamp = new Date().toISOString();
-    const userAgent = request.headers['user-agent'] || 'unknown';
+    const userAgent = (request.headers['user-agent'] || 'unknown').substring(
+      0,
+      80,
+    );
 
     this.logger.log(
-      `[${timestamp}] 🔐 POST /api/auth/create-or-update - Auth sync attempt: user=${user.uid}, email=${user.email || 'no-email'}, ip=${ip}, userAgent=${userAgent.substring(0, 50)}`,
+      `Auth sync attempt from ip=${ip} userAgent=${userAgent}`,
     );
 
     const userData = await this.authService.createOrUpdateUser(
@@ -40,9 +43,7 @@ export class AuthController {
       user.name,
     );
 
-    this.logger.log(
-      `[${new Date().toISOString()}] ✅ Auth sync successful: user=${user.uid}, email=${user.email || 'no-email'}`,
-    );
+    this.logger.log(`Auth sync successful from ip=${ip}`);
 
     return {
       success: true,

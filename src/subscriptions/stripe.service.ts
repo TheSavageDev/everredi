@@ -55,7 +55,7 @@ export class StripeService {
   ): Promise<Stripe.BillingPortal.Session> {
     return this.stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.FRONTEND_URL}/settings/subscription`,
+      return_url: `${process.env.FRONTEND_URL}/account/subscription`,
     });
   }
 

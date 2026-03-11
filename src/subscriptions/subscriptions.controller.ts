@@ -71,12 +71,17 @@ export class SubscriptionsController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string,
   ) {
+    const rawBody = req.rawBody?.toString() ?? '';
+    this.logger.log(
+      `[Stripe Webhook] Received request, body length=${rawBody.length}, hasSignature=${!!signature}`,
+    );
     try {
-      const event = this.stripeService.handleWebhook(
-        req.rawBody?.toString() ?? '',
-        signature,
+      const event = this.stripeService.handleWebhook(rawBody, signature);
+      this.logger.log(
+        `[Stripe Webhook] Verified event id=${event.id} type=${event.type}`,
       );
       await this.subscriptionsService.handleWebhookEvent(event);
+      this.logger.log(`[Stripe Webhook] Processed event id=${event.id}`);
       return { received: true };
     } catch (error: unknown) {
       const errorMessage =
@@ -203,7 +208,7 @@ export class SubscriptionsController {
       }
 
       this.logger.log(
-        `[RevenueCat Webhook] Received event: ${JSON.stringify(body).substring(0, 200)}`,
+        `[RevenueCat Webhook] Received event type=${(body as any).type ?? (body as any).event?.type ?? '?'} app_user_id=${(body as any).app_user_id ?? (body as any).event?.app_user_id ?? '?'} payloadPreview=${JSON.stringify(body).substring(0, 300)}`,
       );
 
       await this.subscriptionsService.handleRevenueCatWebhook(body);

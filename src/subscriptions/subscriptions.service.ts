@@ -16,27 +16,38 @@ export interface SubscriptionUpdate {
 }
 
 export interface RevenueCatWebhookPayload {
-  event: {
-    id: string;
-    app_user_id: string;
-    product_id: string;
-    period_type: string;
-    purchased_at_ms: number;
-    expiration_at_ms: number | null;
-    environment: string;
-    entitlement_ids: string[];
-    presented_offering_id?: string;
-    transaction_id: string;
-    original_transaction_id: string;
-    is_family_share: boolean;
-    store: string;
+  /** Top-level (RevenueCat actual format); event is optional legacy nesting */
+  type?: string;
+  id?: string;
+  app_user_id?: string;
+  original_app_user_id?: string;
+  entitlement_ids?: string[] | null;
+  product_id?: string;
+  store?: string;
+  expiration_at_ms?: number | null;
+  event_timestamp_ms?: number;
+  event?: {
+    type?: string;
+    id?: string;
+    app_user_id?: string;
+    product_id?: string;
+    period_type?: string;
+    purchased_at_ms?: number;
+    expiration_at_ms?: number | null;
+    environment?: string;
+    entitlement_ids?: string[] | null;
+    transaction_id?: string;
+    original_transaction_id?: string;
+    is_family_share?: boolean;
+    store?: string;
   };
 }
 
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
-  private readonly ENTITLEMENT_ID = 'everredi_pro';
+  /** Must match the entitlement identifier in RevenueCat dashboard (e.g. everredi-pro). */
+  private readonly ENTITLEMENT_ID = 'everredi-pro';
 
   constructor(
     private readonly stripeService: StripeService,
@@ -100,6 +111,9 @@ export class SubscriptionsService {
   }
 
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
+    this.logger.log(
+      `[Stripe Webhook] handleWebhookEvent type=${event.type} id=${event.id}`,
+    );
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutCompleted(event.data.object);
@@ -110,27 +124,81 @@ export class SubscriptionsService {
       case 'customer.subscription.deleted':
         await this.handleSubscriptionDeleted(event.data.object);
         break;
+      default:
+        this.logger.debug(
+          `[Stripe Webhook] Unhandled event type=${event.type}`,
+        );
     }
   }
 
   private async handleCheckoutCompleted(
     session: Stripe.Checkout.Session,
   ): Promise<void> {
-    const userId = session.metadata?.userId;
-    if (!userId) return;
+    let userId = session.metadata?.userId as string | undefined;
+    this.logger.log(
+      `[Stripe Webhook] checkout.session.completed sessionId=${session.id} metadata.userId=${userId ?? '(missing)'} customer=${session.customer ?? '(none)'}`,
+    );
+
+    if (!userId && session.customer) {
+      const customerId =
+        typeof session.customer === 'string'
+          ? session.customer
+          : (session.customer as { id?: string })?.id;
+      if (customerId) {
+        const user = await this.usersService.getUserByStripeCustomerId(
+          customerId,
+        );
+        if (user) {
+          userId = user.id;
+          this.logger.log(
+            `[Stripe Webhook] Resolved user by stripe_customer_id: ${userId}`,
+          );
+        } else {
+          this.logger.warn(
+            `[Stripe Webhook] No user found for stripe customer ${customerId}; Supabase user will not be updated. Session was likely created outside this app (e.g. RevenueCat). Rely on RevenueCat webhook to update user.`,
+          );
+        }
+      }
+    }
+
+    if (!userId) {
+      this.logger.warn(
+        '[Stripe Webhook] checkout.session.completed: no userId in metadata and could not resolve by customer; skipping user update',
+      );
+      return;
+    }
 
     await this.updateUserSubscription(userId, {
       subscriptionTier: 'premium',
       subscriptionStatus: 'active',
-      // Expiration will be managed by subsequent subscription.updated events
       subscriptionExpiresAt: undefined,
     });
+    this.logger.log(
+      `[Stripe Webhook] Updated user ${userId} to premium (checkout.session.completed)`,
+    );
+  }
+
+  private async resolveUserIdFromSubscription(
+    subscription: Stripe.Subscription,
+  ): Promise<string | null> {
+    let userId = subscription.metadata?.userId as string | undefined;
+    if (userId) return userId;
+    const customerId =
+      typeof subscription.customer === 'string'
+        ? subscription.customer
+        : (subscription.customer as { id?: string })?.id;
+    if (!customerId) return null;
+    const user = await this.usersService.getUserByStripeCustomerId(customerId);
+    return user?.id ?? null;
   }
 
   private async handleSubscriptionUpdated(
     subscription: Stripe.Subscription,
   ): Promise<void> {
-    const userId = subscription.metadata?.userId;
+    const userId = await this.resolveUserIdFromSubscription(subscription);
+    this.logger.log(
+      `[Stripe Webhook] customer.subscription.updated subId=${subscription.id} status=${subscription.status} userId=${userId ?? '(none)'}`,
+    );
     if (!userId) return;
 
     const currentPeriodEnd = (
@@ -150,7 +218,10 @@ export class SubscriptionsService {
   private async handleSubscriptionDeleted(
     subscription: Stripe.Subscription,
   ): Promise<void> {
-    const userId = subscription.metadata?.userId;
+    const userId = await this.resolveUserIdFromSubscription(subscription);
+    this.logger.log(
+      `[Stripe Webhook] customer.subscription.deleted subId=${subscription.id} userId=${userId ?? '(none)'}`,
+    );
     if (!userId) return;
 
     await this.updateUserSubscription(userId, {
@@ -174,42 +245,69 @@ export class SubscriptionsService {
 
   /**
    * Handle RevenueCat webhook events
-   * RevenueCat sends webhooks when purchases, renewals, cancellations happen
+   * RevenueCat sends webhooks when purchases, renewals, cancellations happen.
+   * Payload has top-level type, app_user_id, entitlement_ids, etc. (see RevenueCat docs).
    */
   async handleRevenueCatWebhook(
-    event: RevenueCatWebhookPayload,
+    payload: RevenueCatWebhookPayload,
   ): Promise<void> {
-    try {
-      const { app_user_id, entitlement_ids, expiration_at_ms } = event.event;
+    const eventType = payload.type ?? payload.event?.type ?? 'unknown';
+    const appUserId =
+      payload.app_user_id ??
+      payload.event?.app_user_id ??
+      payload.original_app_user_id;
+    const entitlementIds =
+      payload.entitlement_ids ?? payload.event?.entitlement_ids ?? null;
 
-      this.logger.log(
-        `[RevenueCat Webhook] Processing event for user ${app_user_id}`,
+    this.logger.log(
+      `[RevenueCat Webhook] Received type=${eventType} app_user_id=${appUserId ?? '(none)'} store=${payload.store ?? payload.event?.store ?? '?'} entitlement_ids=${JSON.stringify(entitlementIds)}`,
+    );
+
+    if (!appUserId) {
+      this.logger.warn(
+        '[RevenueCat Webhook] No app_user_id in payload; TRANSFER events use transferred_to. Skipping.',
       );
+      return;
+    }
 
+    if (
+      entitlementIds == null ||
+      (Array.isArray(entitlementIds) && entitlementIds.length === 0)
+    ) {
+      this.logger.warn(
+        `[RevenueCat Webhook] entitlement_ids is null or empty for product_id=${payload.product_id ?? payload.event?.product_id ?? '?'}. ` +
+          'In RevenueCat dashboard, ensure the product is attached to the everredi-pro entitlement.',
+      );
+    }
+
+    try {
       // Fetch latest customer info from RevenueCat API to get full entitlement data
       const customerInfo =
-        await this.revenueCatService.getCustomerInfo(app_user_id);
+        await this.revenueCatService.getCustomerInfo(appUserId);
 
       // Update revenuecat_customers table
-      await this.syncRevenueCatCustomerToDatabase(app_user_id, customerInfo);
+      await this.syncRevenueCatCustomerToDatabase(appUserId, customerInfo);
 
-      // Sync to users table
+      // Resolve Pro entitlement (dashboard may use everredi-pro or everredi_pro)
+      const entitlements = customerInfo.subscriber.entitlements || {};
       const entitlement =
-        customerInfo.subscriber.entitlements[this.ENTITLEMENT_ID];
+        entitlements[this.ENTITLEMENT_ID] ??
+        entitlements['everredi_pro'];
+
       const isPremium = !!entitlement;
       const expiresAt = entitlement?.expires_date
         ? new Date(entitlement.expires_date)
         : null;
       const isExpired = expiresAt && expiresAt < new Date();
 
-      await this.usersService.updateUser(app_user_id, {
+      await this.usersService.updateUser(appUserId, {
         subscriptionTier: isPremium && !isExpired ? 'premium' : 'free',
         subscriptionStatus: isPremium && !isExpired ? 'active' : 'expired',
-        subscriptionExpiresAt: expiresAt || undefined,
+        subscriptionExpiresAt: expiresAt ?? undefined,
       });
 
       this.logger.log(
-        `[RevenueCat Webhook] Updated subscription for user ${app_user_id}: isPremium=${isPremium && !isExpired}`,
+        `[RevenueCat Webhook] Updated user ${appUserId} isPremium=${isPremium && !isExpired} (entitlement=${!!entitlement} expired=${isExpired})`,
       );
     } catch (error: unknown) {
       const errorMessage =

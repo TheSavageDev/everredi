@@ -41,7 +41,7 @@ describe('SubscriptionsService', () => {
       getCustomerInfo: jest.fn().mockResolvedValue({
         subscriber: {
           entitlements: {
-            everredi_pro: {
+            'everredi-pro': {
               expires_date: new Date(Date.now() + 86400000).toISOString(),
               product_identifier: 'pro',
               purchase_date: new Date().toISOString(),
@@ -216,7 +216,7 @@ describe('SubscriptionsService', () => {
       await service.handleRevenueCatWebhook({
         event: {
           app_user_id: 'user-1',
-          entitlement_ids: ['everredi_pro'],
+          entitlement_ids: ['everredi-pro'],
           expiration_at_ms: Date.now() + 86400000,
           product_id: 'pro',
           period_type: 'normal',
@@ -241,7 +241,7 @@ describe('SubscriptionsService', () => {
       (revenueCatService.getCustomerInfo as jest.Mock).mockResolvedValue({
         subscriber: {
           entitlements: {
-            everredi_pro: {
+            'everredi-pro': {
               expires_date: new Date(Date.now() - 1000).toISOString(),
               product_identifier: 'pro',
               purchase_date: new Date().toISOString(),
@@ -280,7 +280,7 @@ describe('SubscriptionsService', () => {
         request_date: '',
         request_date_ms: 0,
         subscriber: {
-          entitlements: { everredi_pro: {} as any },
+          entitlements: { 'everredi-pro': {} as any },
           first_seen: '',
           last_seen: '',
           management_url: null,

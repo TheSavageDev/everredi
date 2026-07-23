@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "EverRedi",
+    "slug": "everredi",
+    "scheme": "everredi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router", "expo-secure-store"],
+    "ios": { "bundleIdentifier": "app.everredi" },
+    "android": { "package": "app.everredi" },
+    "experiments": { "typedRoutes": true }
+  }
+}

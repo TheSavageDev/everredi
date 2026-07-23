@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #1b2a4a;
+  --mist: #e8eef5;
+  --accent: #2f6fed;
+  --pine: #1f6b4a;
+}
+
+body {
+  @apply bg-mist text-ink font-sans antialiased;
+  background-image:
+    radial-gradient(1200px 600px at 10% -10%, rgba(47, 111, 237, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% 0%, rgba(31, 107, 74, 0.12), transparent 55%),
+    linear-gradient(180deg, #f7fafc 0%, #e8eef5 100%);
+  min-height: 100vh;
+}

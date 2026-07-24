@@ -1,0 +1,71 @@
+# EverRedi local Supabase stack + auth defaults.
+# Remote auth (hosted project jszxqowkkyjmplbzbgvf) is applied via:
+#   pnpm exec node scripts/configure-supabase-auth.mjs
+# See docs/AUTH.md.
+
+project_id = "jszxqowkkyjmplbzbgvf"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+# Production site — also applied to the hosted project by the configure script.
+site_url = "https://everredi.vercel.app"
+additional_redirect_urls = [
+  "https://everredi.vercel.app/auth/callback",
+  "https://*.vercel.app/auth/callback",
+  "http://localhost:3000/auth/callback",
+  "http://127.0.0.1:3000/auth/callback",
+  "everredi://auth/callback",
+  "everredi://**",
+]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+secure_password_change = true
+
+[auth.sms]
+enable_signup = false
+
+# Google — set secrets via env (never commit real values).
+# SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID can be a comma-separated list:
+# webClientId,iosClientId,androidClientId (web first).
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = false
+
+# Apple — Services ID first for web OAuth; App ID app.everredi for native.
+# SUPABASE_AUTH_EXTERNAL_APPLE_SECRET is the JWT generated from your .p8 key.
+[auth.external.apple]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
+email_optional = false

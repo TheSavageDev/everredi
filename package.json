@@ -13,7 +13,8 @@
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "db:generate": "pnpm --filter @everredi/api db:generate",
-    "db:migrate": "pnpm --filter @everredi/api db:migrate"
+    "db:migrate": "pnpm --filter @everredi/api db:migrate",
+    "auth:configure": "node scripts/configure-supabase-auth.mjs"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

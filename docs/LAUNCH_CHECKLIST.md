@@ -3,7 +3,7 @@
 ## Infrastructure
 
 - [x] Create Supabase project (dev) and apply `supabase/migrations/0001_init.sql` (`jszxqowkkyjmplbzbgvf`)
-- [ ] Set Auth providers: email, Google, Apple
+- [ ] Set Auth providers: email, Google, Apple (see [AUTH.md](./AUTH.md); web + mobile UI wired)
 - [ ] Configure `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET` for API
 - [ ] Deploy web + API as [Vercel Services](./VERCEL.md) (one project; Docker/Cloud Run is fallback only)
 - [ ] Leave web `NEXT_PUBLIC_API_URL` unset (same-origin `/api`); point Expo `EXPO_PUBLIC_API_URL` at `https://<deployment>/api`
@@ -29,9 +29,10 @@
 
 ## Legal / marketing
 
-- [ ] Privacy + terms reviewed
+- [x] Privacy, terms, EULA, and disclaimer pages shipped (`/privacy`, `/terms`, `/eula`, `/disclaimer`)
+- [ ] Legal copy reviewed by counsel (optional but recommended before paid launch)
 - [ ] Pricing page matches RC products
-- [ ] Support contact listed
+- [x] Support contact listed (`support@everredi.app` on footer + legal pages)
 
 ## Explicitly not in v1 launch
 

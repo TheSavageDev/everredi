@@ -17,8 +17,10 @@ Prefer **one Vercel project with Services** (`web` + `api`) — see [`docs/VERCE
 
 ## Auth
 
-1. Client signs in with Supabase Auth
-2. Sends `Authorization: Bearer <access_token>` to Nest
+1. Client signs in with Supabase Auth (email/password, Google, or Apple)
+2. Web OAuth: `/auth/callback` exchanges the PKCE code, then `/auth/complete` bootstraps the workspace
+3. Sends `Authorization: Bearer <access_token>` to Nest
+4. Public legal: `/terms`, `/privacy`, `/eula`, `/disclaimer` (see [AUTH.md](./AUTH.md))
 3. Nest verifies JWT (JWKS / JWT secret) and upserts `users`
 4. Personal workspace is created on first login
 

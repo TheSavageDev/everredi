@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { getApi } from '@/lib/api';
+import { LegalLinks } from '@/components/legal-links';
+import { SocialAuthButtons } from '@/components/social-auth-buttons';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -38,7 +40,6 @@ export default function LoginPage() {
         error?: string;
       };
       if (!bootstrap.ok || !payload.data?.workspace) {
-        // Fallback for local split-process without BotID proxy wiring.
         const { workspace } = await getApi().auth.createOrUpdate();
         setWorkspace(workspace);
       } else {
@@ -53,12 +54,26 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
       <Link href="/" className="font-display text-3xl font-bold">
         EverRedi
       </Link>
       <h1 className="mt-8 text-2xl font-semibold">Sign in</h1>
-      <form onSubmit={onSubmit} className="mt-6 space-y-4">
+
+      <div className="mt-6">
+        <SocialAuthButtons
+          disabled={loading}
+          onError={(message) => setError(message || null)}
+        />
+      </div>
+
+      <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-wide text-ink/45">
+        <span className="h-px flex-1 bg-ink/15" />
+        or email
+        <span className="h-px flex-1 bg-ink/15" />
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-4">
         <input
           className="w-full rounded-md border border-ink/15 bg-white px-3 py-2"
           type="email"
@@ -87,6 +102,7 @@ export default function LoginPage() {
       <p className="mt-4 text-sm text-ink/70">
         No account? <Link href="/signup">Create one</Link>
       </p>
+      <LegalLinks className="mt-8" />
     </main>
   );
 }

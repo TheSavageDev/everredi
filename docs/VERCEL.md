@@ -16,18 +16,14 @@ Research against current Vercel docs (Services public beta, June 2026) and this 
 | P1 | **Throttling** on Nest | global `ThrottlerGuard` |
 | P2 | **Queues** (`workspace-alerts` topic) | cron `?dispatch=queue` + consumer route |
 | P2 | **Workflow** durable fan-out | cron `?dispatch=workflow` + `workflows/workspace-alerts.ts` |
-| P2 | **Edge Config** flags | `maintenanceMode`, `signupEnabled`, `alertsDispatch` via middleware |
+| P2 | **Edge Config** flags | `maintenanceMode` (root layout), `signupEnabled` (signup page), `alertsDispatch` (cron) |
 | P2 | **Blob** client upload | `/api/blob/upload` + `lib/blob.ts` |
 
 Sandbox is intentionally **not** wired (post-v1 AI / RediBot only).
 
-## Services routing
+## Services routing notes
 
-| Path | Service |
-|------|---------|
-| `/api/cron/*`, `/api/queues/*`, `/api/blob/*`, `/api/auth/bootstrap`, `/.well-known/workflow/*` | `web` |
-| `/api/*` (everything else) | `api` (Nest) |
-| `/*` | `web` |
+Next.js **middleware (Edge)** is not supported with Vercel Services. Maintenance and signup gates run in Node server components / layouts instead.
 
 Nest keeps `globalPrefix('api')`. Browser / mobile use public `/api`. Server-side web code uses binding `API_INTERNAL_URL`.
 

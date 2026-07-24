@@ -2,7 +2,7 @@
 
 ## Infrastructure
 
-- [ ] Create Supabase project (dev) and apply `supabase/migrations/0001_init.sql`
+- [x] Create Supabase project (dev) and apply `supabase/migrations/0001_init.sql` (`jszxqowkkyjmplbzbgvf`)
 - [ ] Set Auth providers: email, Google, Apple
 - [ ] Configure `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET` for API
 - [ ] Deploy API (Cloud Run or equivalent) and web (Vercel/Cloud Run)

@@ -26,9 +26,24 @@ export default function LoginPage() {
         password,
       });
       if (authError) throw authError;
-      const { user, workspace } = await getApi().auth.createOrUpdate();
-      setWorkspace(workspace);
-      void user;
+      const bootstrap = await fetch('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const payload = (await bootstrap.json()) as {
+        success?: boolean;
+        data?: { workspace: Parameters<typeof setWorkspace>[0] };
+        message?: string;
+        error?: string;
+      };
+      if (!bootstrap.ok || !payload.data?.workspace) {
+        // Fallback for local split-process without BotID proxy wiring.
+        const { workspace } = await getApi().auth.createOrUpdate();
+        setWorkspace(workspace);
+      } else {
+        setWorkspace(payload.data.workspace);
+      }
       router.push('/app');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed');

@@ -2,95 +2,112 @@
 
 Research against current Vercel docs (Services public beta, June 2026) and this monorepo.
 
-## Spike in this PR
+## What is implemented in code
 
-Root [`vercel.json`](../vercel.json) defines two **Vercel Services** in one project:
-
-| Service | Root | Public route |
-|---------|------|----------------|
-| `web` | `apps/web` | `/(.*)` |
-| `api` | `apps/api` (NestJS) | `/api/(.*)` |
-
-- Nest keeps `globalPrefix('api')`, so `/api/health` reaches the API without path stripping.
-- `web` binds to `api` as `API_INTERNAL_URL` for server-side calls (no public egress).
-- Browser / mobile use the public same-origin (or deployment) `/api` surface.
-- Dockerfiles remain for optional self-host / Cloud Run fallback.
-
-### How to try it
-
-1. Enable **Services** on the Vercel team/project (feature permission may be required).
-2. `vercel link` from the repo root (project framework / Services mode).
-3. Set env for both services: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, RevenueCat secrets.
-4. Leave `NEXT_PUBLIC_API_URL` unset in production so web defaults to `/api`.
-5. Point mobile `EXPO_PUBLIC_API_URL` at `https://<deployment>/api`.
-6. `vercel deploy` (or Git integration). Use `vercel dev` / `vercel dev -L` for local multi-service.
-
-### Path / CORS notes
-
-- Same-origin web → API avoids most CORS issues.
-- When `VERCEL=1`, Nest also allows `*.vercel.app` origins for preview tooling and mobile webviews.
-- Local split-process: keep `NEXT_PUBLIC_API_URL=http://localhost:5051/api` and `CORS_ORIGIN=http://localhost:3000`.
-
----
-
-## High-value features we are not using yet
-
-Prioritized for EverRedi soft launch.
-
-### P0 — do soon
-
-| Feature | Why it helps | Action |
-|---------|--------------|--------|
-| **[Vercel Services](https://vercel.com/docs/services)** | Atomic web+API deploys, shared previews, internal bindings | Spike config in this PR; replace Cloud Run split on checklist |
-| **[Deployment Protection](https://vercel.com/docs/deployment-protection)** + automation bypass | Lock previews; let Playwright hit them via `x-vercel-protection-bypass` | Enable Vercel Auth on previews; wire bypass into `apps/web` Playwright config |
-| **[Cron Jobs](https://vercel.com/docs/cron-jobs)** | Daily expiration / low-stock notification fan-out without Cloud Tasks | Add secured Nest `POST /api/internal/cron/alerts` + `crons` in `vercel.json` |
-| **Security headers** (started) | Baseline XSS/clickjacking posture | Expand with CSP once marketing + app URLs stabilize |
-| **Fluid compute** (default on Nest) | Active CPU pricing for webhook/idle-heavy API | Confirm on project; no code change |
-
-### P1 — soft launch polish
-
-| Feature | Why it helps | Action |
-|---------|--------------|--------|
-| **[Web Analytics](https://vercel.com/docs/analytics)** + **[Speed Insights](https://vercel.com/docs/speed-insights)** | Marketing funnel + Core Web Vitals with almost no infra | Add `@vercel/analytics` / `@vercel/speed-insights` to `apps/web` layout |
-| **[Vercel Firewall](https://vercel.com/docs/vercel-firewall)** managed rules | OWASP / bot / AI-scraper baseline in front of Nest webhooks + auth | Enable managed ruleset; allowlist RevenueCat webhook path if needed |
-| **[BotID](https://vercel.com/docs/botid)** | Protect signup / invite accept from automated abuse | Protect `POST` auth-ish routes from web |
-| **Skew Protection** | Avoid version skew between web assets and Nest during rolling deploys | Enable in project settings (Next supports it) |
-| **Observability / Log Drains** | One place for Nest + Next logs; optional drain to Axiom/etc. | Turn on; keep Sentry for app errors (cursor rule already expects it) |
-| **Playwright against previews** | Checklist item “Playwright smoke green against staging” | CI job on `deployment_status` + bypass secret |
-
-### P2 — later / as needs appear
-
-| Feature | Why it helps | Action |
-|---------|--------------|--------|
-| **[Queues](https://vercel.com/docs/queues)** | Offload fan-out notifications, email, RC post-processing | After Cron MVP; consider for invite email |
-| **[Workflow](https://vercel.com/docs/workflow)** | Durable multi-step (invite → reminder → expire) | Only if Cron+Queues are insufficient |
-| **[Vercel Blob](https://vercel.com/docs/vercel-blob)** | Kit photos / receipt uploads later | Not in v1 backlog; use when media lands |
-| **[Edge Config](https://vercel.com/docs/edge-config)** | Feature flags / kill switches without redeploy | Optional for Pro limits or maintenance mode |
-| **[Connect](https://vercel.com/docs/connect)** / OIDC | Short-lived creds to Marketplace DBs & third parties | Nice if we move secrets off long-lived env keys |
-| **Marketplace Supabase** | Credential injection from dashboard | Optional; current project `jszxqowkkyjmplbzbgvf` already works via env |
-| **Secure Compute / static IPs** | Private path to Postgres if we leave Supabase pooler public | Only if compliance requires it |
-| **Sandbox** | Isolated agent/code execution | Not relevant until AI/RediBot (explicitly post-v1) |
-
----
-
-## Explicit non-goals (for now)
-
-- Dual Stripe checkout in app (backlog)
-- Replacing Supabase Auth with another IdP
-- Moving mobile hosting onto Vercel (Expo/EAS stays)
-- Dropping Dockerfiles until Services is proven in production
-
----
-
-## Env matrix (Services)
-
-| Variable | Service | Notes |
+| Priority | Feature | Status |
 |----------|---------|--------|
+| P0 | **Vercel Services** (`web` + `api`) | `vercel.json` |
+| P0 | **Cron** expiration / low-stock alerts | `GET /api/cron/alerts` → Nest `/api/internal/cron/alerts` (daily 13:00 UTC) |
+| P0 | **Security headers** + CSP | top-level `headers` in `vercel.json` |
+| P0 | **Fluid compute** | `"fluid": true` |
+| P0/P1 | **Deployment Protection bypass** for Playwright | `playwright.config.ts` + `.github/workflows/preview-e2e.yml` |
+| P1 | **Web Analytics** + **Speed Insights** | root layout |
+| P1 | **BotID** | `instrumentation-client.ts` + `/api/auth/bootstrap`, `/api/blob/upload` |
+| P1 | **Throttling** on Nest | global `ThrottlerGuard` |
+| P2 | **Queues** (`workspace-alerts` topic) | cron `?dispatch=queue` + consumer route |
+| P2 | **Workflow** durable fan-out | cron `?dispatch=workflow` + `workflows/workspace-alerts.ts` |
+| P2 | **Edge Config** flags | `maintenanceMode`, `signupEnabled`, `alertsDispatch` via middleware |
+| P2 | **Blob** client upload | `/api/blob/upload` + `lib/blob.ts` |
+
+Sandbox is intentionally **not** wired (post-v1 AI / RediBot only).
+
+## Services routing
+
+| Path | Service |
+|------|---------|
+| `/api/cron/*`, `/api/queues/*`, `/api/blob/*`, `/api/auth/bootstrap`, `/.well-known/workflow/*` | `web` |
+| `/api/*` (everything else) | `api` (Nest) |
+| `/*` | `web` |
+
+Nest keeps `globalPrefix('api')`. Browser / mobile use public `/api`. Server-side web code uses binding `API_INTERNAL_URL`.
+
+### Local / deploy
+
+```bash
+pnpm install
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
+
+# Prefer vercel dev for production-like Services + bindings:
+vercel link
+vercel env pull
+vercel dev   # or: vercel dev -L
+```
+
+Production: leave `NEXT_PUBLIC_API_URL` unset; set mobile `EXPO_PUBLIC_API_URL=https://<deployment>/api`.
+
+---
+
+## Dashboard checklist (must click in Vercel)
+
+These cannot be fully expressed as repo files — complete after first project link:
+
+### P0 / P1 platform settings
+
+- [ ] Create Vercel project from this repo; framework / mode = **Services**
+- [ ] Enable **Fluid compute** (default on new projects; confirm)
+- [ ] **Deployment Protection**: Vercel Authentication on Preview (and Staging if used)
+- [ ] Generate **Protection Bypass for Automation** → GitHub secret `VERCEL_AUTOMATION_BYPASS_SECRET`
+- [ ] Enable **Skew Protection**
+- [ ] Enable **Web Analytics** + **Speed Insights** for the project (SDK already mounted)
+- [ ] **Firewall** → enable managed ruleset (`vercel_ruleset` / OWASP); allowlist RevenueCat webhook IP/path if it false-positives (`POST /api/subscriptions/revenuecat/webhook`)
+- [ ] **Observability**: turn on runtime logs; optional Log Drain to your sink
+- [ ] Set shared env (Production + Preview):  
+  `DATABASE_URL`, `SUPABASE_*`, `CRON_SECRET`, `REVENUECAT_*`, `NEXT_PUBLIC_SUPABASE_*`, `BLOB_READ_WRITE_TOKEN`, `EDGE_CONFIG`
+
+### P2 storage / networking
+
+- [ ] Create **Edge Config** store; connect to project (`EDGE_CONFIG`); seed keys:  
+  `maintenanceMode=false`, `signupEnabled=true`, `alertsDispatch="sync"`
+- [ ] Create **Blob** store; connect token as `BLOB_READ_WRITE_TOKEN`
+- [ ] Enable **Queues** beta for the project (topic `workspace-alerts` is declared in `vercel.json`)
+- [ ] Optional: **Marketplace → Supabase** for credential injection (current project `jszxqowkkyjmplbzbgvf` already works via env)
+- [ ] Optional: **Connect** / OIDC for short-lived third-party creds
+- [ ] Optional: **Secure Compute** / static IPs only if Postgres must leave the public Supabase pooler
+
+### Cron / dispatch modes
+
+| Mode | How | When |
+|------|-----|------|
+| `sync` (default) | Cron → Nest full scan | Soft launch |
+| `queue` | Cron enqueues per workspace; consumer processes | Larger workspaces |
+| `workflow` | Durable Workflow SDK fan-out | Need crash-safe retries |
+
+Set Edge Config `alertsDispatch` or call `/api/cron/alerts?dispatch=queue|workflow` (still requires `Authorization: Bearer $CRON_SECRET`).
+
+---
+
+## Env matrix
+
+| Variable | Where | Notes |
+|----------|-------|--------|
 | `DATABASE_URL` | api | Supabase Postgres |
-| `SUPABASE_URL` / `SUPABASE_JWT_SECRET` / `SUPABASE_SERVICE_ROLE_KEY` | api | JWT verify + admin |
-| `REVENUECAT_*` | api | Webhook + entitlement id |
-| `CORS_ORIGIN` | api | Optional when same-origin; set for mobile web if needed |
-| `NEXT_PUBLIC_SUPABASE_*` | web | Browser auth |
-| `NEXT_PUBLIC_API_URL` | web | Leave unset on Vercel (`/api`); set for local Nest |
-| `API_INTERNAL_URL` | web | Injected by binding — server-only |
-| `EXPO_PUBLIC_API_URL` | mobile (EAS) | `https://<prod>/api` |
+| `SUPABASE_URL` / `JWT_SECRET` / `SERVICE_ROLE_KEY` | api | |
+| `CRON_SECRET` | api + web | Cron + internal Nest routes |
+| `REVENUECAT_*` | api | |
+| `NEXT_PUBLIC_SUPABASE_*` | web | |
+| `NEXT_PUBLIC_API_URL` | web | Unset on Vercel |
+| `API_INTERNAL_URL` | web | Binding (injected) |
+| `EDGE_CONFIG` | web | Flags |
+| `BLOB_READ_WRITE_TOKEN` | web | Uploads |
+| `EXPO_PUBLIC_API_URL` | mobile | `https://<prod>/api` |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | GitHub Actions | Preview e2e |
+
+---
+
+## Explicit non-goals
+
+- Dual Stripe checkout in app (product backlog)
+- Sandbox / agent Linux VMs (post-v1 AI)
+- Hosting Expo on Vercel (EAS stays)
+- Dropping Dockerfiles until Services is proven in production

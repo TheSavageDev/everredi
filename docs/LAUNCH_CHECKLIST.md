@@ -7,8 +7,11 @@
 - [ ] Configure `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET` for API
 - [ ] Deploy web + API as [Vercel Services](./VERCEL.md) (one project; Docker/Cloud Run is fallback only)
 - [ ] Leave web `NEXT_PUBLIC_API_URL` unset (same-origin `/api`); point Expo `EXPO_PUBLIC_API_URL` at `https://<deployment>/api`
-- [ ] Enable Deployment Protection on previews + Playwright bypass secret
-- [ ] Enable Web Analytics + Speed Insights on web
+- [ ] Set `CRON_SECRET` on web + api; confirm daily `/api/cron/alerts` in Vercel Cron
+- [ ] Complete [Vercel dashboard checklist](./VERCEL.md#dashboard-checklist-must-click-in-vercel) (Protection, Firewall, Skew, Edge Config, Blob, Queues)
+- [x] Web Analytics + Speed Insights SDK mounted (enable in project dashboard)
+- [x] BotID on auth bootstrap + blob upload
+- [x] Playwright preview-e2e workflow + protection bypass headers
 
 ## Billing
 

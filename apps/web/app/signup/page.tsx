@@ -24,8 +24,23 @@ export default function SignupPage() {
       const supabase = createClient();
       const { error: authError } = await supabase.auth.signUp({ email, password });
       if (authError) throw authError;
-      const { workspace } = await getApi().auth.createOrUpdate({ displayName });
-      setWorkspace(workspace);
+      const bootstrap = await fetch('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName }),
+      });
+      const payload = (await bootstrap.json()) as {
+        success?: boolean;
+        data?: { workspace: Parameters<typeof setWorkspace>[0] };
+        message?: string;
+        error?: string;
+      };
+      if (!bootstrap.ok || !payload.data?.workspace) {
+        const { workspace } = await getApi().auth.createOrUpdate({ displayName });
+        setWorkspace(workspace);
+      } else {
+        setWorkspace(payload.data.workspace);
+      }
       router.push('/app');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign up failed');

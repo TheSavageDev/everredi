@@ -38,4 +38,4 @@ See [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITEC
 
 ## Deploy
 
-Preferred: one Vercel project with **Services** (`apps/web` + `apps/api`). See [`docs/VERCEL.md`](docs/VERCEL.md) and root `vercel.json`.
+Preferred: one Vercel project with **Services** (`apps/web` + `apps/api`). See [`docs/VERCEL.md`](docs/VERCEL.md) and root `vercel.json` for Cron, Queues, Workflow, Edge Config, Blob, BotID, and dashboard setup.

@@ -34,4 +34,8 @@ pnpm dev
 
 ## Docs
 
-See [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), and [`docs/BACKLOG.md`](docs/BACKLOG.md).
+See [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/VERCEL.md`](docs/VERCEL.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), and [`docs/BACKLOG.md`](docs/BACKLOG.md).
+
+## Deploy
+
+Preferred: one Vercel project with **Services** (`apps/web` + `apps/api`). See [`docs/VERCEL.md`](docs/VERCEL.md) and root `vercel.json`.

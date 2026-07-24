@@ -11,6 +11,10 @@ apps/mobile → Expo Router + Zustand + TanStack Query
 packages/types | validation | api-client | config
 ```
 
+## Deploy target
+
+Prefer **one Vercel project with Services** (`web` + `api`) — see [`docs/VERCEL.md`](./VERCEL.md). Public routing: `/` → Next, `/api/*` → Nest. Dockerfiles remain as a self-host / Cloud Run fallback.
+
 ## Auth
 
 1. Client signs in with Supabase Auth

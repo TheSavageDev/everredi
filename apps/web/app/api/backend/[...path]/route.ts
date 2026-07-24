@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5051/api';
+/**
+ * Local-dev proxy only.
+ *
+ * On Vercel Services, public `/api/*` is rewritten to the Nest `api` service, so
+ * this route is unused in production. Prefer `NEXT_PUBLIC_API_URL=/api` (default).
+ *
+ * Server-side code can also use the injected binding `API_INTERNAL_URL` to reach
+ * Nest without traversing the public edge.
+ */
+const API_URL =
+  process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:5051/api';
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;

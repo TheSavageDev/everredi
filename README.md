@@ -4,8 +4,8 @@ Greenfield monorepo for EverRedi — kit and inventory tracking with multi-membe
 
 ## Apps
 
-- `apps/api` — NestJS API (Drizzle + Supabase Auth/Postgres)
-- `apps/web` — Next.js App Router (marketing + app)
+- `apps/api` — Rust API (Axum, Tokio, sqlx, Supabase Auth/Postgres) on port 5051
+- `apps/web` — Next.js App Router (marketing + app). Proxies `/api` to the Rust service.
 - `apps/mobile` — Expo Router (iOS/Android)
 
 ## Packages
@@ -23,8 +23,8 @@ cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
 cp apps/mobile/.env.example apps/mobile/.env
 
-# Apply SQL migrations to your Supabase project, then:
-pnpm --filter @everredi/api db:migrate
+# Apply the SQL schema to your Supabase project (or local Postgres):
+psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
 pnpm dev
 ```
 
@@ -38,4 +38,4 @@ See [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITEC
 
 ## Deploy
 
-Preferred: one Vercel project with **Services** (`apps/web` + `apps/api`). See [`docs/VERCEL.md`](docs/VERCEL.md) and root `vercel.json` for Cron, Queues, Workflow, Edge Config, Blob, BotID, and dashboard setup.
+Web stays on Vercel. The Rust API is a container (`apps/api/Dockerfile`); set `API_INTERNAL_URL` to that origin so Next can proxy `/api` and the daily alerts cron can call it. See [`docs/VERCEL.md`](docs/VERCEL.md).

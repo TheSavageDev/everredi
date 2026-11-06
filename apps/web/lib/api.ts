@@ -2,8 +2,8 @@ import { createEverrediClient } from '@everredi/api-client';
 import { createClient } from './supabase/client';
 
 function resolveApiBaseUrl() {
-  // Prefer same-origin /api when running as a Vercel Service (public rewrite).
-  // NEXT_PUBLIC_API_URL remains available for local split-process or external API hosts.
+  // Same-origin /api is rewritten to the Rust service.
+  // NEXT_PUBLIC_API_URL remains available for local split-process or an external API host.
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }

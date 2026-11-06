@@ -7,13 +7,13 @@ Research against current Vercel docs (Services public beta, June 2026) and this 
 | Priority | Feature | Status |
 |----------|---------|--------|
 | P0 | **Vercel Services** (`web` + `api`) | `vercel.json` |
-| P0 | **Cron** expiration / low-stock alerts | `GET /api/cron/alerts` → Nest `/api/internal/cron/alerts` (daily 13:00 UTC) |
+| P0 | **Cron** expiration / low-stock alerts | `GET /api/cron/alerts` → Rust `/api/internal/cron/alerts` (daily 13:00 UTC) |
 | P0 | **Security headers** + CSP | top-level `headers` in `vercel.json` |
 | P0 | **Fluid compute** | `"fluid": true` |
 | P0/P1 | **Deployment Protection bypass** for Playwright | `playwright.config.ts` + `.github/workflows/preview-e2e.yml` |
 | P1 | **Web Analytics** + **Speed Insights** | root layout |
 | P1 | **BotID** | `instrumentation-client.ts` + `/api/auth/bootstrap`, `/api/blob/upload` |
-| P1 | **Throttling** on Nest | global `ThrottlerGuard` |
+| P1 | **API process** | Rust service (`apps/api`), not a Vercel Nest service |
 | P2 | **Queues** (`workspace-alerts` topic) | cron `?dispatch=queue` + consumer route |
 | P2 | **Workflow** durable fan-out | cron `?dispatch=workflow` + `workflows/workspace-alerts.ts` |
 | P2 | **Edge Config** flags | `maintenanceMode` (root layout), `signupEnabled` (signup page), `alertsDispatch` (cron) |
@@ -25,7 +25,7 @@ Sandbox is intentionally **not** wired (post-v1 AI / RediBot only).
 
 Next.js **middleware (Edge)** is not supported with Vercel Services. Maintenance and signup gates run in Node server components / layouts instead.
 
-Nest keeps `globalPrefix('api')`. Browser / mobile use public `/api`. Server-side web code uses binding `API_INTERNAL_URL`.
+The Rust API keeps the `/api` prefix on port 5051. Browser calls use same-origin `/api`, rewritten to `API_INTERNAL_URL`. Server-side web code calls that origin directly.
 
 ### Local / deploy
 
@@ -75,7 +75,7 @@ These cannot be fully expressed as repo files — complete after first project l
 
 | Mode | How | When |
 |------|-----|------|
-| `sync` (default) | Cron → Nest full scan | Soft launch |
+| `sync` (default) | Cron → Rust full scan | The only dispatch |
 | `queue` | Cron enqueues per workspace; consumer processes | Larger workspaces |
 | `workflow` | Durable Workflow SDK fan-out | Need crash-safe retries |
 
@@ -89,7 +89,7 @@ Set Edge Config `alertsDispatch` or call `/api/cron/alerts?dispatch=queue|workfl
 |----------|-------|--------|
 | `DATABASE_URL` | api | Supabase Postgres |
 | `SUPABASE_URL` / `JWT_SECRET` / `SERVICE_ROLE_KEY` | api | |
-| `CRON_SECRET` | api + web | Cron + internal Nest routes |
+| `CRON_SECRET` | api + web | Cron calling the Rust API |
 | `REVENUECAT_*` | api | |
 | `NEXT_PUBLIC_SUPABASE_*` | web | |
 | `NEXT_PUBLIC_API_URL` | web | Unset on Vercel |

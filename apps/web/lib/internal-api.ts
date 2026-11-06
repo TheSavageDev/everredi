@@ -1,4 +1,4 @@
-/** Server-only helpers for calling Nest via service binding or public URL. */
+/** Server-only helpers for calling the Rust API. */
 
 export function resolveInternalApiBaseUrl() {
   const fromBinding = process.env.API_INTERNAL_URL?.replace(/\/$/, '');
@@ -7,7 +7,7 @@ export function resolveInternalApiBaseUrl() {
   const publicUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '');
   if (publicUrl) return publicUrl;
 
-  // Same-origin rewrite to Nest when running on Vercel Services.
+  // Same-origin /api, which Next rewrites to the Rust service.
   if (process.env.VERCEL_URL) {
     return `https://${process.env.VERCEL_URL}/api`;
   }

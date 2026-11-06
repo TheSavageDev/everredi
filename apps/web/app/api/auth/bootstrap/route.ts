@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 
 /**
  * BotID-protected bootstrap after Supabase sign-in / sign-up.
- * Proxies to Nest `POST /api/auth/create-or-update`.
+ * Proxies to the Rust API `POST /api/auth/create-or-update`.
  */
 export async function POST(request: NextRequest) {
   const verification = await checkBotId();

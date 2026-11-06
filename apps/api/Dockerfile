@@ -1,24 +1,15 @@
-FROM node:22-alpine AS base
+# Build from apps/api: docker build -t everredi-api apps/api
+FROM rust:bookworm AS build
 WORKDIR /app
-RUN corepack enable
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release --locked
 
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-COPY packages ./packages
-COPY apps/api/package.json ./apps/api/package.json
-RUN pnpm install --filter @everredi/api...
-
-FROM deps AS build
-COPY . .
-RUN pnpm --filter @everredi/types build \
- && pnpm --filter @everredi/validation build \
- && pnpm --filter @everredi/api build
-
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-COPY --from=build /app/apps/api/dist ./dist
-COPY --from=build /app/apps/api/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
+FROM debian:bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/target/release/everredi-api /usr/local/bin/everredi-api
+ENV PORT=5051
 EXPOSE 5051
-CMD ["node", "dist/main.js"]
+CMD ["everredi-api"]
